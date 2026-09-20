@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="#install"><img src="https://img.shields.io/badge/ICE-0.2.0-50d2ff?style=flat-square&labelColor=061018" alt="ICE 0.2.0"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/ICE-0.3.0-50d2ff?style=flat-square&labelColor=061018" alt="ICE 0.3.0"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-a0ecff?style=flat-square&labelColor=061018" alt="Apache 2.0 license"></a>
   <a href="#platforms"><img src="https://img.shields.io/badge/distribution-native_binaries-40dcaa?style=flat-square&labelColor=061018" alt="Native binary distribution"></a>
   <a href="#how-installation-works"><img src="https://img.shields.io/badge/downloads-SHA--256_verified-a0ecff?style=flat-square&labelColor=061018" alt="SHA-256 verified downloads"></a>
