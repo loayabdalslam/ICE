@@ -194,6 +194,11 @@ ASSERT:
   contains <path> <text>
   file_exists <path>
 
+Output format is STRICT. Emit ONLY the schema above (optionally after a
+<think>…</think> block). Do NOT use XML tool tags like <tool_call>,
+<function=…>, or <parameter=…>, and do NOT emit JSON tool-call objects.
+Actions are plain lines under BURST:, exactly as shown.
+
 Rules:
 - Prefer one burst that finishes the job.
 - Never sudo. Never escape the workspace.

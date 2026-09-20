@@ -102,6 +102,7 @@ fn run_outer_loop(job: &Job, send: &dyn Fn(Event)) -> Result<()> {
     });
 
     let max = durable.max_loops.max(1);
+    let mut fails_in_a_row = 0u32;
     for pass in 1..=max {
         if durable.is_done(&job.root) {
             durable.open = false;
@@ -131,7 +132,22 @@ fn run_outer_loop(job: &Job, send: &dyn Fn(Event)) -> Result<()> {
             "{}\n\nDurable DONE WHEN lives in .ice/goal.md.\nWhen the goal is truly finished, write an empty marker to .ice/DONE and satisfy the DONE WHEN asserts.\nUse spawn/agent for parallel work.",
             durable.text
         );
-        let _ = run_ice_turns(job, send, &inner_goal, prior, 3, Some(pass));
+        let closed = run_ice_turns(job, send, &inner_goal, prior, 3, Some(pass)).unwrap_or(false);
+        if closed {
+            fails_in_a_row = 0;
+        } else {
+            fails_in_a_row += 1;
+        }
+        if fails_in_a_row >= 2 && !durable.is_done(&job.root) {
+            send(Event::Assistant(
+                "Stopping the goal loop: two passes made no progress. Refine the goal, switch model (/models), or use /demo.".into(),
+            ));
+            send(Event::Done {
+                turns: pass,
+                ok: false,
+            });
+            return Ok(());
+        }
         let packed_note = format!(
             "## loop {pass}\n{}\n",
             DurableGoal::read_progress(&job.root)
@@ -311,6 +327,16 @@ fn run_ice_turns(
         if yielded {
             send(Event::Assistant(
                 "Burst yielded for a decision. Reply to continue.".into(),
+            ));
+            if loop_pass.is_none() {
+                send(Event::Done { turns, ok: false });
+            }
+            return Ok(false);
+        }
+        // Stop chasing an identical failure instead of retrying it repeatedly.
+        if last_delta.as_deref() == Some(packed.summary.as_str()) {
+            send(Event::Assistant(
+                "No progress on retry — stopping so I don't loop on the same error. Try rephrasing the goal or run /demo.".into(),
             ));
             if loop_pass.is_none() {
                 send(Event::Done { turns, ok: false });

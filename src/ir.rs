@@ -68,6 +68,22 @@ pub struct Burst {
 impl Burst {
     pub fn parse(raw: &str) -> Result<Self> {
         let text = strip_fences(raw);
+
+        // Many models ignore the schema and emit their own tool-call markup
+        // (e.g. <tool_call><function=read><parameter=file_path>…</parameter>).
+        // Translate that into real actions instead of shelling out the tags.
+        if text.contains("<function=") || text.contains("<tool_call") || text.contains("\"tool_calls\"") {
+            let actions = extract_tool_calls(&text);
+            if !actions.is_empty() {
+                let asserts = infer_asserts(&actions);
+                return Ok(Burst {
+                    goal: "(tool calls)".into(),
+                    actions,
+                    asserts,
+                });
+            }
+        }
+
         let mut goal = String::new();
         let mut actions = Vec::new();
         let mut asserts = Vec::new();
@@ -125,14 +141,19 @@ impl Burst {
         }
 
         if actions.is_empty() {
-            // Treat a bare shell-ish dump as a single run if the model forgot the schema.
             let trimmed = text.trim();
-            if !trimmed.is_empty() {
+            if trimmed.is_empty() {
+                bail!("empty burst: no actions parsed");
+            } else if trimmed.lines().count() == 1 && looks_like_shell(trimmed) {
+                // A single, clearly shell-shaped line the model forgot to wrap.
                 actions.push(Action::Run {
                     cmd: trimmed.to_string(),
                 });
             } else {
-                bail!("empty burst: no actions parsed");
+                // Prose or unrecognized markup — never shell it out. Ask to retry.
+                actions.push(Action::Yield {
+                    reason: "no runnable actions in reply — rephrase or add a BURST".into(),
+                });
             }
         }
         if asserts.is_empty() {
@@ -154,6 +175,101 @@ enum Sec {
     Top,
     Burst,
     Assert,
+}
+
+/// Extract ICE actions from model-native tool-call markup: XML-ish
+/// `<function=NAME><parameter=key>value</parameter></function>` blocks and,
+/// as a fallback, `{"name":..,"arguments":{..}}` JSON objects.
+fn extract_tool_calls(text: &str) -> Vec<Action> {
+    let mut actions = Vec::new();
+    let fn_re = regex::Regex::new(r"(?s)<function=([A-Za-z_]+)\s*>(.*?)</function>").ok();
+    let param_re = regex::Regex::new(r"(?s)<parameter=([A-Za-z_]+)\s*>(.*?)</parameter>").ok();
+    if let (Some(fn_re), Some(param_re)) = (fn_re, param_re) {
+        for cap in fn_re.captures_iter(text) {
+            let name = cap[1].to_ascii_lowercase();
+            let body = &cap[2];
+            let mut params: Vec<(String, String)> = Vec::new();
+            for p in param_re.captures_iter(body) {
+                params.push((p[1].to_ascii_lowercase(), p[2].trim().to_string()));
+            }
+            if let Some(a) = action_from_call(&name, &params) {
+                actions.push(a);
+            }
+        }
+    }
+    if actions.is_empty() {
+        // JSON tool-call objects: {"name":"read","arguments":{"file_path":"x"}}
+        if let Some(re) = regex::Regex::new(r#"(?s)\{[^{}]*"name"\s*:\s*"([A-Za-z_]+)"[^{}]*\}"#).ok()
+        {
+            for cap in re.captures_iter(text) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&cap[0]) {
+                    let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("").to_ascii_lowercase();
+                    let args = v.get("arguments").or_else(|| v.get("parameters"));
+                    let mut params = Vec::new();
+                    if let Some(obj) = args.and_then(|a| a.as_object()) {
+                        for (k, val) in obj {
+                            let s = val.as_str().map(String::from).unwrap_or_else(|| val.to_string());
+                            params.push((k.to_ascii_lowercase(), s));
+                        }
+                    }
+                    if let Some(a) = action_from_call(&name, &params) {
+                        actions.push(a);
+                    }
+                }
+            }
+        }
+    }
+    actions
+}
+
+fn pick(params: &[(String, String)], keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|k| {
+        params
+            .iter()
+            .find(|(pk, _)| pk == k)
+            .map(|(_, v)| v.clone())
+    })
+}
+
+fn action_from_call(name: &str, params: &[(String, String)]) -> Option<Action> {
+    match name {
+        "read" | "cat" | "view" | "open" | "read_file" => Some(Action::Read {
+            path: pick(params, &["file_path", "path", "filename", "file"])?,
+        }),
+        "list" | "ls" | "list_dir" | "listdir" => Some(Action::List {
+            path: pick(params, &["path", "dir", "directory"]).unwrap_or_else(|| ".".into()),
+        }),
+        "grep" | "search" | "find" => Some(Action::Grep {
+            pattern: pick(params, &["pattern", "query", "regex", "text"]).unwrap_or_default(),
+            path: pick(params, &["path", "dir", "directory"]).unwrap_or_else(|| ".".into()),
+        }),
+        "write" | "create" | "create_file" | "write_file" | "new_file" => Some(Action::Write {
+            path: pick(params, &["file_path", "path", "filename", "file"])?,
+            contents: pick(params, &["content", "contents", "text", "body", "data"])
+                .unwrap_or_default(),
+        }),
+        "replace" | "edit" | "str_replace" | "patch" | "edit_file" => Some(Action::Replace {
+            path: pick(params, &["file_path", "path", "filename", "file"])?,
+            old: pick(params, &["old", "old_str", "old_string", "search"]).unwrap_or_default(),
+            new: pick(params, &["new", "new_str", "new_string", "replace", "content"])
+                .unwrap_or_default(),
+        }),
+        "run" | "bash" | "shell" | "exec" | "execute" | "command" | "run_command" => {
+            Some(Action::Run {
+                cmd: pick(params, &["command", "cmd", "script", "code"])?,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn infer_asserts(actions: &[Action]) -> Vec<Assert> {
+    for a in actions {
+        if let Action::Write { path, .. } = a {
+            return vec![Assert::FileExists { path: path.clone() }];
+        }
+    }
+    vec![Assert::ExitZero]
 }
 
 fn strip_fences(s: &str) -> String {
@@ -476,4 +592,48 @@ fn looks_like_shell(line: &str) -> bool {
         || t.starts_with("cargo ")
         || t.starts_with("rg ")
         || t.starts_with("grep ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_qwen_xml_tool_call_as_read() {
+        let raw = "<tool_call><function=read><parameter=file_path>.ice/goal.md</parameter></function></tool_call>";
+        let b = Burst::parse(raw).unwrap();
+        assert_eq!(b.actions.len(), 1);
+        match &b.actions[0] {
+            Action::Read { path } => assert_eq!(path, ".ice/goal.md"),
+            other => panic!("expected Read, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xml_write_infers_file_exists_assert() {
+        let raw = "<function=write><parameter=path>index.html</parameter><parameter=content><h1>hi</h1></parameter></function>";
+        let b = Burst::parse(raw).unwrap();
+        match &b.actions[0] {
+            Action::Write { path, contents } => {
+                assert_eq!(path, "index.html");
+                assert!(contents.contains("hi"));
+            }
+            other => panic!("expected Write, got {other:?}"),
+        }
+        assert!(matches!(b.asserts[0], Assert::FileExists { .. }));
+    }
+
+    #[test]
+    fn prose_reply_yields_instead_of_shelling_out() {
+        let raw = "I will read the goal file and then decide what to do next.";
+        let b = Burst::parse(raw).unwrap();
+        assert!(matches!(b.actions[0], Action::Yield { .. }));
+    }
+
+    #[test]
+    fn valid_schema_still_parses() {
+        let raw = "GOAL: x\nBURST:\n  write a.txt\n  <<\nhi\n  >>\nASSERT:\n  file_exists a.txt\n";
+        let b = Burst::parse(raw).unwrap();
+        assert!(matches!(b.actions[0], Action::Write { .. }));
+    }
 }

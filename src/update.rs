@@ -11,8 +11,8 @@ use std::time::Duration;
 /// Where release artifacts live. Mirrors the installer's default and can be
 /// overridden for local testing.
 pub fn base_url() -> String {
+    // Only a dedicated override — never ICE_BASE_URL, which points at the LLM API.
     std::env::var("ICE_UPDATE_BASE_URL")
-        .or_else(|_| std::env::var("ICE_BASE_URL"))
         .unwrap_or_else(|_| "https://raw.githubusercontent.com/loayabdalslam/ICE/main".into())
         .trim_end_matches('/')
         .to_string()
