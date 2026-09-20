@@ -85,6 +85,9 @@ pub struct App {
     pub history: Vec<(String, String)>,
     /// Last max scroll offset computed during render (for follow/auto-scroll).
     pub max_scroll: std::cell::Cell<u16>,
+    /// Cached presence of each CLI agent (index matches providers::CLI_AGENTS),
+    /// computed once so rendering never spawns `which` subprocesses per frame.
+    pub cli_present: Vec<bool>,
 }
 
 impl App {
@@ -92,7 +95,10 @@ impl App {
         let cfg = IceConfig::load();
         cfg.apply_env();
         let model = cfg.model.clone();
-        let has_key = crate::llm::Llm::from_env().is_some();
+        let has_key = crate::llm::Llm::from_env().is_some()
+            || providers::selected_cli_agent()
+                .map(providers::cli_agent_present)
+                .unwrap_or(false);
         let goal_text = DurableGoal::load(&root).map(|g| g.text);
         let onboard = !cfg.onboarded;
         Self {
@@ -151,6 +157,10 @@ impl App {
             follow: true,
             history: Vec::new(),
             max_scroll: std::cell::Cell::new(0),
+            cli_present: providers::CLI_AGENTS
+                .iter()
+                .map(providers::cli_agent_present)
+                .collect(),
         }
     }
 
@@ -253,17 +263,45 @@ impl App {
     pub fn onboard_next(&mut self) {
         match self.onboard_step {
             0 => {
-                let p = PROVIDERS[self.onboard_idx.min(PROVIDERS.len() - 1)];
-                self.provider = p.id.into();
-                self.model = p.default_model.into();
-                let mut cfg = IceConfig::load();
-                cfg.provider = p.id.into();
-                cfg.model = p.default_model.into();
-                cfg.base_url = Some(p.base_url.into());
-                cfg.apply_env();
-                let _ = cfg.save();
-                self.onboard_step = 1;
-                self.status = format!("provider {} · paste key or enter if env is set", p.id);
+                if self.onboard_idx < PROVIDERS.len() {
+                    let p = PROVIDERS[self.onboard_idx];
+                    self.provider = p.id.into();
+                    self.model = p.default_model.into();
+                    let mut cfg = IceConfig::load();
+                    cfg.provider = p.id.into();
+                    cfg.model = p.default_model.into();
+                    cfg.base_url = Some(p.base_url.into());
+                    cfg.apply_env();
+                    let _ = cfg.save();
+                    self.onboard_step = 1;
+                    self.status = format!("provider {} · paste key or enter if env is set", p.id);
+                } else {
+                    // A CLI agent backend — no API key needed; uses its own login.
+                    let c = providers::CLI_AGENTS
+                        [(self.onboard_idx - PROVIDERS.len()).min(providers::CLI_AGENTS.len() - 1)];
+                    self.provider = format!("cli:{}", c.id);
+                    self.model = c.id.into();
+                    let mut cfg = IceConfig::load();
+                    cfg.provider = self.provider.clone();
+                    cfg.model = c.id.into();
+                    cfg.base_url = None;
+                    cfg.onboarded = true;
+                    cfg.apply_env();
+                    let _ = cfg.save();
+                    let present = providers::cli_agent_present(&c);
+                    self.demo = !present;
+                    self.onboard_step = 3;
+                    self.screen = Screen::Welcome;
+                    self.status = if present {
+                        format!("using {} · {}", c.name, c.login_hint)
+                    } else {
+                        format!("{} not found on PATH · install it, then {}", c.bin, c.login_hint)
+                    };
+                    self.push_sys(&format!(
+                        "Backend: {}\n{}\nICE will send your messages to `{}` and show its output.",
+                        c.name, c.login_hint, c.bin
+                    ));
+                }
             }
             1 => {
                 let p = PROVIDERS[self.onboard_idx.min(PROVIDERS.len() - 1)];
@@ -674,6 +712,23 @@ impl App {
 
     fn cmd_providers(&mut self, arg: &str) {
         if !arg.is_empty() {
+            if let Some(c) = arg.strip_prefix("cli:").and_then(providers::find_cli_agent) {
+                self.provider = format!("cli:{}", c.id);
+                self.model = c.id.into();
+                let mut cfg = IceConfig::load();
+                cfg.provider = self.provider.clone();
+                cfg.model = c.id.into();
+                cfg.base_url = None;
+                cfg.apply_env();
+                let _ = cfg.save();
+                let present = providers::cli_agent_present(c);
+                self.demo = !present;
+                self.push_sys(&format!(
+                    "backend: {} (`{}`)\n{}",
+                    c.name, c.bin, c.login_hint
+                ));
+                return;
+            }
             if let Some(p) = providers::find(arg) {
                 self.provider = p.id.into();
                 self.model = p.default_model.into();
@@ -1001,6 +1056,12 @@ fn is_conversational(text: &str) -> bool {
     }
     // Very short, no action signal → chat.
     words <= 4
+}
+
+/// Total selectable entries on the onboarding provider screen: API providers
+/// followed by CLI-agent backends.
+pub fn onboard_choice_count() -> usize {
+    PROVIDERS.len() + crate::providers::CLI_AGENTS.len()
 }
 
 /// Prepend recent conversation to a prompt so turns build on each other.

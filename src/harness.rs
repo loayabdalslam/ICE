@@ -56,6 +56,11 @@ pub fn run(job: Job) {
 }
 
 fn run_inner(job: &Job, send: &dyn Fn(Event)) -> Result<()> {
+    // A selected CLI agent (Codex/ChatGPT, Claude Code, opencode…) is the
+    // backend: hand the whole message to it and show its output.
+    if let Some(agent) = crate::providers::selected_cli_agent() {
+        return run_cli_backend(job, send, agent);
+    }
     if job.chat_mode {
         return run_chat(job, send);
     }
@@ -250,6 +255,45 @@ fn trim_messages(msgs: &mut Vec<(String, String)>, keep: usize) {
     let mut trimmed = vec![first];
     trimmed.extend_from_slice(&msgs[tail_start..]);
     *msgs = trimmed;
+}
+
+/// Delegate the message to a logged-in CLI agent and surface its output.
+fn run_cli_backend(
+    job: &Job,
+    send: &dyn Fn(Event),
+    agent: &crate::providers::CliAgent,
+) -> Result<()> {
+    if !crate::providers::cli_agent_present(agent) {
+        send(Event::Assistant(format!(
+            "`{}` isn't on PATH. Install it, then: {}",
+            agent.bin, agent.login_hint
+        )));
+        send(Event::Done { turns: 1, ok: false });
+        return Ok(());
+    }
+    send(Event::Thinking);
+    send(Event::Step(StepResult {
+        title: format!("agent {}", agent.bin),
+        ok: true,
+        exit: 0,
+        output: format!("delegating to {}…", agent.name),
+        ms: 0,
+    }));
+    match crate::cli::complete(agent, &job.goal, &job.root) {
+        Ok(text) => {
+            send(Event::Assistant(if text.trim().is_empty() {
+                "(no output)".into()
+            } else {
+                text
+            }));
+            send(Event::Done { turns: 1, ok: true });
+        }
+        Err(e) => {
+            send(Event::Error(e.to_string()));
+            send(Event::Done { turns: 1, ok: false });
+        }
+    }
+    Ok(())
 }
 
 /// Fast conversational path: one completion, plain text, no tools.

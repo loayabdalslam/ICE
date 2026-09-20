@@ -113,6 +113,84 @@ pub const PROVIDERS: &[Provider] = &[
     },
 ];
 
+/// A CLI coding agent ICE can drive as its backend, reusing the user's own
+/// login/subscription in that tool instead of an API key.
+#[derive(Clone, Copy, Debug)]
+pub struct CliAgent {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub bin: &'static str,
+    /// argv passed to the binary; "{PROMPT}" is replaced with the message.
+    pub args: &'static [&'static str],
+    /// One-line hint on how to authenticate the CLI.
+    pub login_hint: &'static str,
+    /// True for the "Sign in with ChatGPT" path.
+    pub chatgpt: bool,
+}
+
+pub const CLI_AGENTS: &[CliAgent] = &[
+    CliAgent {
+        id: "codex",
+        name: "ChatGPT · Codex CLI",
+        bin: "codex",
+        args: &["exec", "{PROMPT}"],
+        login_hint: "Run `codex login` and choose “Sign in with ChatGPT”.",
+        chatgpt: true,
+    },
+    CliAgent {
+        id: "claude",
+        name: "Claude · Claude Code CLI",
+        bin: "claude",
+        args: &["-p", "{PROMPT}"],
+        login_hint: "Run `claude` once and sign in (Anthropic account or key).",
+        chatgpt: false,
+    },
+    CliAgent {
+        id: "opencode",
+        name: "opencode",
+        bin: "opencode",
+        args: &["run", "{PROMPT}"],
+        login_hint: "Run `opencode auth login` to connect a provider.",
+        chatgpt: false,
+    },
+    CliAgent {
+        id: "gemini",
+        name: "Gemini CLI",
+        bin: "gemini",
+        args: &["-p", "{PROMPT}"],
+        login_hint: "Run `gemini` once to sign in with your Google account.",
+        chatgpt: false,
+    },
+    CliAgent {
+        id: "qwen",
+        name: "Qwen Code CLI",
+        bin: "qwen",
+        args: &["-p", "{PROMPT}"],
+        login_hint: "Run `qwen` once to authenticate.",
+        chatgpt: false,
+    },
+];
+
+pub fn find_cli_agent(id: &str) -> Option<&'static CliAgent> {
+    let id = id.strip_prefix("cli:").unwrap_or(id);
+    CLI_AGENTS.iter().find(|c| c.id.eq_ignore_ascii_case(id))
+}
+
+/// The CLI agent selected as the active backend, if the config provider is
+/// `cli:<id>`.
+pub fn selected_cli_agent() -> Option<&'static CliAgent> {
+    let cfg = IceConfig::load();
+    if cfg.provider.starts_with("cli:") {
+        find_cli_agent(&cfg.provider)
+    } else {
+        None
+    }
+}
+
+pub fn cli_agent_present(c: &CliAgent) -> bool {
+    which(c.bin)
+}
+
 #[derive(Clone, Debug)]
 pub struct InstalledCli {
     pub id: &'static str,

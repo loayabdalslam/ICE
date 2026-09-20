@@ -1,5 +1,6 @@
 mod agents;
 mod app;
+mod cli;
 mod delta;
 mod exec;
 mod goal;
@@ -357,7 +358,7 @@ fn run_loop(term: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) ->
                     if app.screen == app::Screen::Onboard {
                         if app.onboard_step == 0 {
                             app.onboard_idx =
-                                (app.onboard_idx + 1).min(crate::providers::PROVIDERS.len() - 1);
+                                (app.onboard_idx + 1).min(crate::app::onboard_choice_count() - 1);
                         } else if app.onboard_step == 2 && !app.models.is_empty() {
                             app.model_idx = (app.model_idx + 1).min(app.models.len() - 1);
                         }

@@ -125,27 +125,41 @@ fn draw_onboard(f: &mut Frame, app: &App, area: Rect) {
 
     match app.onboard_step {
         0 => {
-            let items: Vec<ListItem> = PROVIDERS
-                .iter()
+            // Combined list: API providers, then CLI-agent backends.
+            let np = PROVIDERS.len();
+            let mut rows: Vec<(bool, String)> = Vec::new();
+            for p in PROVIDERS {
+                let ready = providers::key_for(p).is_some();
+                rows.push((ready, format!("{:<12}  {}", p.id, p.default_model)));
+            }
+            for (ci, c) in providers::CLI_AGENTS.iter().enumerate() {
+                let ready = app.cli_present.get(ci).copied().unwrap_or(false);
+                rows.push((ready, format!("cli:{:<8}  {}", c.id, c.name)));
+            }
+            let items: Vec<ListItem> = rows
+                .into_iter()
                 .enumerate()
                 .skip(
                     app.onboard_idx
                         .saturating_sub(inner.height.saturating_sub(1) as usize),
                 )
                 .take(inner.height as usize)
-                .map(|(i, p)| {
-                    let ready = providers::key_for(p).is_some();
+                .map(|(i, (ready, label))| {
                     let mark = if ready { "●" } else { "○" };
                     let sel = if i == app.onboard_idx { "▸" } else { " " };
-                    ListItem::new(format!(" {sel} {mark}  {:<12}  {}", p.id, p.default_model))
-                        .style(if i == app.onboard_idx {
+                    let tag = if i >= np { " ⌘" } else { "  " };
+                    ListItem::new(format!(" {sel} {mark}{tag} {label}")).style(
+                        if i == app.onboard_idx {
                             Style::default()
                                 .fg(t.bg)
                                 .bg(t.accent)
                                 .add_modifier(Modifier::BOLD)
+                        } else if i >= np {
+                            Style::default().fg(t.ice)
                         } else {
                             t.body()
-                        })
+                        },
+                    )
                 })
                 .collect();
             f.render_widget(List::new(items).style(Style::default().fg(t.text)), inner);
