@@ -58,18 +58,25 @@ impl Llm {
     }
 
     pub fn complete(&self, system: &str, user: &str) -> Result<Completion> {
+        self.complete_messages(system, &[("user".into(), user.into())])
+    }
+
+    /// Multi-turn completion — the basis of the agentic loop. Roles are
+    /// "user"/"assistant"; the system prompt is passed separately.
+    pub fn complete_messages(&self, system: &str, msgs: &[(String, String)]) -> Result<Completion> {
         if self.provider_id == "anthropic" || self.base_url.contains("anthropic.com") {
-            return self.complete_anthropic(system, user);
+            return self.complete_anthropic(system, msgs);
         }
         let url = format!("{}/chat/completions", self.base_url);
+        let mut messages = vec![json!({"role": "system", "content": system})];
+        for (role, content) in msgs {
+            messages.push(json!({"role": role, "content": content}));
+        }
         let body = json!({
             "model": self.model,
             "temperature": 0.2,
-            "max_tokens": 2048,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user}
-            ]
+            "max_tokens": 4096,
+            "messages": messages
         });
         let raw = curl_json(&url, &self.api_key, &body, &[])?;
         if let Some(err) = raw.get("error") {
@@ -107,13 +114,17 @@ impl Llm {
         Ok(split_think(content, thinking))
     }
 
-    fn complete_anthropic(&self, system: &str, user: &str) -> Result<Completion> {
+    fn complete_anthropic(&self, system: &str, msgs: &[(String, String)]) -> Result<Completion> {
         let url = format!("{}/messages", self.base_url.trim_end_matches('/'));
+        let messages: Vec<Value> = msgs
+            .iter()
+            .map(|(role, content)| json!({"role": role, "content": content}))
+            .collect();
         let body = json!({
             "model": self.model,
-            "max_tokens": 2048,
+            "max_tokens": 4096,
             "system": system,
-            "messages": [{"role": "user", "content": user}]
+            "messages": messages
         });
         let extra = [
             "anthropic-version: 2023-06-01".to_string(),
@@ -210,16 +221,14 @@ fn split_think(content: String, mut thinking: String) -> Completion {
     }
 }
 
-pub const SYSTEM_PROMPT: &str = r#"You are the Intent compiler inside ICE, an agent harness.
-You do NOT call tools one-by-one. You emit one BURST: a short program of actions
-plus measurable ASSERTs. The local executor runs the burst at machine speed.
-You are called again only when an ASSERT fails or you YIELD.
+pub const SYSTEM_PROMPT: &str = r#"You are ICE, a fast terminal coding agent (like Claude Code, on a Rust harness).
+You work step by step. Each turn you either CALL ONE OR MORE TOOLS, or, when the
+task is fully finished, you write a short final answer with NO tool calls.
 
-You may think first. If you think, wrap reasoning in <think>...</think>
-then emit ONLY the burst schema after it.
+After every tool call you WILL be shown its result, then you continue. Never
+guess a file's contents — read it. Never claim you did something you didn't do.
 
-GOAL: <one line>
-BURST:
+Emit tool calls as plain lines, one per line, exactly in this vocabulary:
   read <path>
   list <path>
   grep <pattern> <path>
@@ -236,45 +245,34 @@ BURST:
   ====
   new text
   >>>>
-  yield <reason>
-  agent <name>: <delegated goal>
-ASSERT:
-  exit 0
-  contains <path> <text>
-  file_exists <path>
+  skill <name>
+  mcp <server/tool> {json args}
+  todo <text>   ·   todo_done <id>
+  agent <type>: <delegated goal>
 
-Output format is STRICT. Emit ONLY the schema above (optionally after a
-<think>…</think> block). Do NOT use XML tool tags like <tool_call>,
-<function=…>, or <parameter=…>, and do NOT emit JSON tool-call objects.
-Actions are plain lines under BURST:, exactly as shown.
+You may add one short sentence of plain text before your tool calls to say what
+you are doing. When (and only when) the whole task is done, reply with a concise
+final summary and DO NOT emit any tool line — that ends the task.
 
 Rules:
-- Prefer one burst that finishes the job.
+- Take the smallest next step; don't dump a huge plan.
+- To build something, actually WRITE the files with complete contents. For a
+  website, write a self-contained index.html unless more is asked.
 - Never sudo. Never escape the workspace.
-- Every mutation burst MUST have an ASSERT.
-- If you cannot proceed, emit yield.
-- Available extra actions: skill <name> · mcp <server/tool> {json} · todo <text> · todo_done <id>
-- Delegate heavy or parallel work to a subagent: `agent <type>: <goal>`.
-  Types: explore (read-only search), plan (read-only), review (read-only),
-  build (edits files), general. A subagent runs in its own context and returns
-  a short report, so use one to keep this context small.
-
-When the user asks you to build something (a website, a page, a script, an app):
-- Actually WRITE the files with real, complete contents using the write action.
-- For a website, write a self-contained index.html (inline CSS/JS) unless more is asked.
-- Assert the file exists, e.g. `file_exists index.html`.
-- Do NOT just describe the plan — emit the write actions in the burst.
+- Delegate heavy or parallel work with `agent <type>: <goal>` (types: explore,
+  plan, review = read-only; build, general). A subagent returns a short report.
+- Do NOT write a `.ice/DONE` marker and do NOT use ASSERT blocks — you decide
+  when the task is complete by simply stopping with a final answer.
+- You MAY use XML tool tags (<function=…><parameter=…>) or the plain lines
+  above; both are understood. Prefer the plain lines.
 
 Example — "make me a website":
-GOAL: build a simple landing page
-BURST:
   write index.html
   <<
   <!doctype html><html><head><meta charset="utf-8"><title>Hello</title></head>
   <body><h1>Hello</h1><p>Built by ICE.</p></body></html>
   >>
-ASSERT:
-  file_exists index.html
+Then, after seeing it was written, reply: "Done — created index.html with a simple landing page."
 "#;
 
 /// Lightweight system prompt for conversational replies — no schema, fast.

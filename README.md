@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="#install"><img src="https://img.shields.io/badge/ICE-0.4.1-50d2ff?style=flat-square&labelColor=061018" alt="ICE 0.4.1"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/ICE-0.4.2-50d2ff?style=flat-square&labelColor=061018" alt="ICE 0.4.2"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-a0ecff?style=flat-square&labelColor=061018" alt="Apache 2.0 license"></a>
   <a href="#platforms"><img src="https://img.shields.io/badge/distribution-native_binaries-40dcaa?style=flat-square&labelColor=061018" alt="Native binary distribution"></a>
   <a href="#how-installation-works"><img src="https://img.shields.io/badge/downloads-SHA--256_verified-a0ecff?style=flat-square&labelColor=061018" alt="SHA-256 verified downloads"></a>
@@ -74,11 +74,11 @@ The same commands upgrade to the release named in [`LATEST`](LATEST). Open a new
 
 | Platform | Download | Verification |
 | --- | --- | --- |
-| Windows x64 | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.4.1/windows-x86_64/ice.exe) | Built with the release profile; executed and installed on Windows |
-| Linux x64 | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.4.1/linux-x86_64/ice) | Built & published by CI on each tagged release |
-| Linux ARM64 | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.4.1/linux-aarch64/ice) | Built & published by CI on each tagged release |
-| macOS Intel | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.4.1/macos-x86_64/ice) | Built & published by CI on each tagged release |
-| macOS Apple Silicon | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.4.1/macos-aarch64/ice) | Built & published by CI on each tagged release |
+| Windows x64 | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.4.2/windows-x86_64/ice.exe) | Built with the release profile; executed and installed on Windows |
+| Linux x64 | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.4.2/linux-x86_64/ice) | Built & published by CI on each tagged release |
+| Linux ARM64 | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.4.2/linux-aarch64/ice) | Built & published by CI on each tagged release |
+| macOS Intel | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.4.2/macos-x86_64/ice) | Built & published by CI on each tagged release |
+| macOS Apple Silicon | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.4.2/macos-aarch64/ice) | Built & published by CI on each tagged release |
 
 **Requirements:** a Unicode terminal; `curl` for API calls; Bash for shell actions. On Windows, install [Git for Windows](https://gitforwindows.org/) and make `bash.exe` available on PATH. Linux builds use musl to avoid a system glibc dependency. macOS builds require macOS 11 or newer. Windows ARM64 uses the x64 build through Windows emulation.
 
@@ -297,7 +297,7 @@ install.sh                  Linux / macOS auto-detection
 windows/install.ps1         Dedicated Windows entry point
 bash/install.sh             Dedicated Linux entry point
 mac/install.sh              Dedicated macOS entry point
-releases/0.4.1/             Binaries + checksums
+releases/0.4.2/             Binaries + checksums
 assets/                     Brand artwork + actual SVG icons
 docs/                       Setup, verification and website snippets
 licenses/                   Third-party notices

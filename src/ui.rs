@@ -711,12 +711,13 @@ fn draw_todos(f: &mut Frame, app: &App, area: Rect) {
         Line::from(Span::styled(&app.model, t.dim())),
         Line::from(""),
         Line::from(Span::styled("EXECUTION", t.title())),
-        Line::from(format!("{:02} bursts   {:02} turns", app.bursts, app.turns)),
+        Line::from(format!(
+            "{:02} steps   {:02} turns",
+            app.steps_ok + app.steps_fail,
+            app.turns
+        )),
         Line::from(vec![
-            Span::styled(
-                format!("{} passed", app.steps_ok),
-                Style::default().fg(t.ok),
-            ),
+            Span::styled(format!("{} ok", app.steps_ok), Style::default().fg(t.ok)),
             Span::styled(
                 format!(" / {} failed", app.steps_fail),
                 Style::default().fg(if app.steps_fail > 0 { t.err } else { t.muted }),

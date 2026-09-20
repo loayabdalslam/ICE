@@ -578,10 +578,11 @@ impl App {
             return;
         }
         self.goal_text = Some(text.clone());
+        let _ = max;
         self.messages.push(Msg {
             kind: MsgKind::Goal,
             title: "goal".into(),
-            body: format!("{text}\nloop budget {max} · marker .ice/DONE"),
+            body: text.clone(),
         });
         self.start_job(text, true, Some(g));
     }
@@ -802,9 +803,9 @@ impl App {
         self.running = true;
         self.turns += 1;
         self.status = if loop_mode {
-            "goal loop · compiling".into()
+            "working on the goal".into()
         } else {
-            "intent · compiling burst".into()
+            "working".into()
         };
         let job = harness::Job {
             root: self.root.clone(),
@@ -832,11 +833,6 @@ impl App {
                     self.todos = todos::load(&self.root);
                 }
                 Event::Thinking => {
-                    self.messages.push(Msg {
-                        kind: MsgKind::Thinking,
-                        title: "intent".into(),
-                        body: "compiling a burst…".into(),
-                    });
                     self.status = "thinking".into();
                 }
                 Event::ThinkingText(t) => {

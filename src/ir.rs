@@ -183,6 +183,108 @@ enum Sec {
     Assert,
 }
 
+/// One step of the agentic loop: any leading narration text plus the tool
+/// actions to run. No actions ⇒ this is the model's final answer.
+#[derive(Debug, Clone)]
+pub struct AgentStep {
+    pub text: String,
+    pub actions: Vec<Action>,
+}
+
+/// Parse a model turn into narration + actions, understanding both native
+/// tool-call markup and ICE's plain action lines. Prose with no tool line is
+/// treated as the final answer (empty actions).
+pub fn parse_agent_step(raw: &str) -> AgentStep {
+    let text = strip_fences(raw);
+    if text.contains("<function=") || text.contains("<tool_call") || text.contains("\"tool_calls\"")
+    {
+        let actions = extract_tool_calls(&text);
+        if !actions.is_empty() {
+            return AgentStep {
+                text: strip_tool_markup(&text),
+                actions,
+            };
+        }
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    let mut actions = Vec::new();
+    let mut prose = String::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i].trim();
+        if line.is_empty() {
+            i += 1;
+            continue;
+        }
+        let (verb, _) = split_verb(line);
+        if is_action_verb(&verb) {
+            match parse_action(&lines, i) {
+                Ok((a, next)) => {
+                    actions.push(a);
+                    i = next;
+                    continue;
+                }
+                Err(_) => {}
+            }
+        }
+        if actions.is_empty() {
+            if !prose.is_empty() {
+                prose.push('\n');
+            }
+            prose.push_str(lines[i]);
+        }
+        i += 1;
+    }
+    AgentStep {
+        text: prose,
+        actions,
+    }
+}
+
+/// Verbs that unambiguously start a tool line in freeform text. Deliberately
+/// excludes bare words like "done"/"web"/"fetch" that collide with prose.
+fn is_action_verb(v: &str) -> bool {
+    matches!(
+        v,
+        "read"
+            | "list"
+            | "ls"
+            | "grep"
+            | "run"
+            | "exec"
+            | "sh"
+            | "bash"
+            | "write"
+            | "replace"
+            | "patch"
+            | "skill"
+            | "mcp"
+            | "web_search"
+            | "websearch"
+            | "web_fetch"
+            | "webfetch"
+            | "agent"
+            | "spawn"
+            | "subagent"
+            | "todo"
+            | "todo_add"
+            | "todo_done"
+    )
+}
+
+fn strip_tool_markup(text: &str) -> String {
+    let mut s = text.to_string();
+    for pat in [
+        r"(?s)<tool_call>.*?</tool_call>",
+        r"(?s)<function=.*?</function>",
+    ] {
+        if let Ok(re) = regex::Regex::new(pat) {
+            s = re.replace_all(&s, "").to_string();
+        }
+    }
+    s.trim().to_string()
+}
+
 /// Extract ICE actions from model-native tool-call markup: XML-ish
 /// `<function=NAME><parameter=key>value</parameter></function>` blocks and,
 /// as a fallback, `{"name":..,"arguments":{..}}` JSON objects.
