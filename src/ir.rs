@@ -1,0 +1,479 @@
+use anyhow::{bail, Result};
+
+/// One action inside a compiled burst.
+#[derive(Debug, Clone)]
+pub enum Action {
+    Read {
+        path: String,
+    },
+    Grep {
+        pattern: String,
+        path: String,
+    },
+    List {
+        path: String,
+    },
+    Write {
+        path: String,
+        contents: String,
+    },
+    Replace {
+        path: String,
+        old: String,
+        new: String,
+    },
+    Run {
+        cmd: String,
+    },
+    Yield {
+        reason: String,
+    },
+    /// Child ICE loop. Name is a short handle; goal is the delegated task.
+    Agent {
+        name: String,
+        goal: String,
+    },
+    Skill {
+        name: String,
+    },
+    Mcp {
+        tool: String,
+        args: String,
+    },
+    TodoAdd {
+        text: String,
+    },
+    TodoDone {
+        key: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum Assert {
+    ExitZero,
+    ExitCode(i32),
+    Contains { path: String, text: String },
+    NotContains { path: String, text: String },
+    FileExists { path: String },
+    FileNotExists { path: String },
+}
+
+#[derive(Debug, Clone)]
+pub struct Burst {
+    pub goal: String,
+    pub actions: Vec<Action>,
+    pub asserts: Vec<Assert>,
+}
+
+impl Burst {
+    pub fn parse(raw: &str) -> Result<Self> {
+        let text = strip_fences(raw);
+        let mut goal = String::new();
+        let mut actions = Vec::new();
+        let mut asserts = Vec::new();
+
+        let lines: Vec<&str> = text.lines().collect();
+        let mut i = 0;
+        let mut section = Sec::Top;
+
+        while i < lines.len() {
+            let raw_line = lines[i];
+            let line = raw_line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                i += 1;
+                continue;
+            }
+            let upper = line.to_ascii_uppercase();
+            if upper.starts_with("GOAL:") {
+                goal = line[5..].trim().to_string();
+                section = Sec::Top;
+                i += 1;
+                continue;
+            }
+            if upper == "BURST:" || upper == "BURST" {
+                section = Sec::Burst;
+                i += 1;
+                continue;
+            }
+            if upper == "ASSERT:" || upper == "ASSERT" || upper == "ASSERTS:" {
+                section = Sec::Assert;
+                i += 1;
+                continue;
+            }
+            if upper.starts_with("ON_FAIL:") {
+                i += 1;
+                continue;
+            }
+
+            match section {
+                Sec::Top => {
+                    if goal.is_empty() {
+                        goal = line.to_string();
+                    }
+                    i += 1;
+                }
+                Sec::Burst => {
+                    let (action, consumed) = parse_action(&lines, i)?;
+                    actions.push(action);
+                    i = consumed;
+                }
+                Sec::Assert => {
+                    asserts.push(parse_assert(line)?);
+                    i += 1;
+                }
+            }
+        }
+
+        if actions.is_empty() {
+            // Treat a bare shell-ish dump as a single run if the model forgot the schema.
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                actions.push(Action::Run {
+                    cmd: trimmed.to_string(),
+                });
+            } else {
+                bail!("empty burst: no actions parsed");
+            }
+        }
+        if asserts.is_empty() {
+            asserts.push(Assert::ExitZero);
+        }
+        if goal.is_empty() {
+            goal = "(unspecified)".into();
+        }
+        Ok(Burst {
+            goal,
+            actions,
+            asserts,
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Sec {
+    Top,
+    Burst,
+    Assert,
+}
+
+fn strip_fences(s: &str) -> String {
+    let t = s.trim();
+    if let Some(rest) = t.strip_prefix("```") {
+        let rest = rest.find('\n').map(|i| &rest[i + 1..]).unwrap_or(rest);
+        return rest
+            .rsplit_once("```")
+            .map(|(a, _)| a.to_string())
+            .unwrap_or_else(|| rest.to_string());
+    }
+    t.to_string()
+}
+
+fn parse_action(lines: &[&str], i: usize) -> Result<(Action, usize)> {
+    let line = lines[i].trim();
+    let (verb, rest) = split_verb(line);
+
+    match verb.as_str() {
+        "read" => Ok((
+            Action::Read {
+                path: need_arg(&rest, "read")?,
+            },
+            i + 1,
+        )),
+        "list" | "ls" => Ok((
+            Action::List {
+                path: if rest.is_empty() { ".".into() } else { rest },
+            },
+            i + 1,
+        )),
+        "grep" => {
+            let (pattern, path) = split_grep(&rest);
+            Ok((Action::Grep { pattern, path }, i + 1))
+        }
+        "run" | "exec" | "sh" | "bash" => Ok((
+            Action::Run {
+                cmd: need_arg(&rest, "run")?,
+            },
+            i + 1,
+        )),
+        "yield" | "need_brain" | "need_human" => Ok((
+            Action::Yield {
+                reason: if rest.is_empty() {
+                    "decision required".into()
+                } else {
+                    rest
+                },
+            },
+            i + 1,
+        )),
+        "agent" | "spawn" | "subagent" => Ok((parse_agent(&rest), i + 1)),
+        "skill" => Ok((
+            Action::Skill {
+                name: need_arg(&rest, "skill")?,
+            },
+            i + 1,
+        )),
+        "mcp" | "tool" => {
+            let (tool, args) = match rest.split_once(char::is_whitespace) {
+                Some((t, a)) => (t.to_string(), a.trim().to_string()),
+                None => (rest, "{}".into()),
+            };
+            let args = if args.is_empty() { "{}".into() } else { args };
+            Ok((Action::Mcp { tool, args }, i + 1))
+        }
+        "todo" | "todo_add" => Ok((
+            Action::TodoAdd {
+                text: need_arg(&rest, "todo")?,
+            },
+            i + 1,
+        )),
+        "todo_done" | "done" => Ok((
+            Action::TodoDone {
+                key: need_arg(&rest, "todo_done")?,
+            },
+            i + 1,
+        )),
+        "write" => {
+            let path = need_arg(&rest, "write")?;
+            let (body, next) = take_block(lines, i + 1, &[">>", "EOF", "```"])?;
+            Ok((
+                Action::Write {
+                    path,
+                    contents: body,
+                },
+                next,
+            ))
+        }
+        "replace" | "patch" => {
+            let path = need_arg(&rest, "replace")?;
+            let (old, new, next) = take_replace(lines, i + 1)?;
+            Ok((Action::Replace { path, old, new }, next))
+        }
+        other => {
+            // Allow "run-less" shell lines inside BURST
+            if looks_like_shell(line) {
+                Ok((
+                    Action::Run {
+                        cmd: line.to_string(),
+                    },
+                    i + 1,
+                ))
+            } else {
+                bail!("unknown action '{other}'");
+            }
+        }
+    }
+}
+
+fn split_verb(line: &str) -> (String, String) {
+    let line = line.trim_start_matches(['-', '*', '•']).trim();
+    match line.split_once(char::is_whitespace) {
+        Some((v, r)) => (v.to_ascii_lowercase(), r.trim().to_string()),
+        None => (line.to_ascii_lowercase(), String::new()),
+    }
+}
+
+fn need_arg(rest: &str, verb: &str) -> Result<String> {
+    if rest.is_empty() {
+        bail!("{verb} requires a path or argument");
+    }
+    Ok(unquote(rest))
+}
+
+fn unquote(s: &str) -> String {
+    let s = s.trim();
+    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
+        s[1..s.len() - 1].to_string()
+    } else {
+        s.to_string()
+    }
+}
+
+fn split_grep(rest: &str) -> (String, String) {
+    let rest = rest.trim();
+    if rest.is_empty() {
+        return (String::new(), ".".into());
+    }
+    if rest.starts_with('"') {
+        if let Some(end) = rest[1..].find('"') {
+            let pat = rest[1..=end].to_string();
+            let path = rest[end + 2..].trim();
+            return (
+                pat,
+                if path.is_empty() {
+                    ".".into()
+                } else {
+                    unquote(path)
+                },
+            );
+        }
+    }
+    match rest.split_once(char::is_whitespace) {
+        Some((p, path)) => (unquote(p), unquote(path)),
+        None => (unquote(rest), ".".into()),
+    }
+}
+
+fn take_block(lines: &[&str], start: usize, closers: &[&str]) -> Result<(String, usize)> {
+    let mut i = start;
+    // skip opener << or <<'EOF' or ```
+    if i < lines.len() {
+        let t = lines[i].trim();
+        if t.starts_with("<<") || t == "<<" || t.starts_with("```") || t == "{" {
+            i += 1;
+        }
+    }
+    let mut body = String::new();
+    while i < lines.len() {
+        let t = lines[i].trim();
+        if closers.iter().any(|c| t == *c || t.starts_with(c)) {
+            return Ok((body, i + 1));
+        }
+        if !body.is_empty() {
+            body.push('\n');
+        }
+        body.push_str(lines[i]);
+        i += 1;
+    }
+    Ok((body, i))
+}
+
+fn take_replace(lines: &[&str], start: usize) -> Result<(String, String, usize)> {
+    let mut i = start;
+    // skip <<<<
+    if i < lines.len() && lines[i].trim().starts_with("<<<<") {
+        i += 1;
+    }
+    let mut old = String::new();
+    while i < lines.len() && lines[i].trim() != "====" {
+        if !old.is_empty() {
+            old.push('\n');
+        }
+        old.push_str(lines[i]);
+        i += 1;
+    }
+    if i < lines.len() && lines[i].trim() == "====" {
+        i += 1;
+    }
+    let mut new = String::new();
+    while i < lines.len() && lines[i].trim() != ">>>>" {
+        if !new.is_empty() {
+            new.push('\n');
+        }
+        new.push_str(lines[i]);
+        i += 1;
+    }
+    if i < lines.len() && lines[i].trim() == ">>>>" {
+        i += 1;
+    }
+    Ok((old, new, i))
+}
+
+pub fn parse_assert_line(line: &str) -> Result<Assert> {
+    parse_assert(line)
+}
+
+fn parse_agent(rest: &str) -> Action {
+    let rest = rest.trim();
+    if rest.is_empty() {
+        return Action::Agent {
+            name: "worker".into(),
+            goal: "help".into(),
+        };
+    }
+    if let Some((name, goal)) = rest.split_once(':') {
+        Action::Agent {
+            name: slug(name),
+            goal: goal.trim().to_string(),
+        }
+    } else if let Some((name, goal)) = rest.split_once(char::is_whitespace) {
+        Action::Agent {
+            name: slug(name),
+            goal: goal.trim().to_string(),
+        }
+    } else {
+        Action::Agent {
+            name: slug(rest),
+            goal: rest.to_string(),
+        }
+    }
+}
+
+fn slug(s: &str) -> String {
+    let s: String = s
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let s = s.trim_matches('-').to_string();
+    if s.is_empty() {
+        "worker".into()
+    } else {
+        s.chars().take(24).collect()
+    }
+}
+
+fn parse_assert(line: &str) -> Result<Assert> {
+    let line = line.trim().trim_start_matches(['-', '*']).trim();
+    let lower = line.to_ascii_lowercase();
+    if lower == "exit 0" || lower == "exit_zero" || lower == "pytest exit 0" {
+        return Ok(Assert::ExitZero);
+    }
+    if let Some(rest) = lower.strip_prefix("exit ") {
+        if let Ok(code) = rest.trim().parse::<i32>() {
+            return Ok(Assert::ExitCode(code));
+        }
+    }
+    if let Some(rest) = strip_prefix_ci(line, "contains ") {
+        let (path, text) = split_two(rest);
+        return Ok(Assert::Contains { path, text });
+    }
+    if let Some(rest) = strip_prefix_ci(line, "not_contains ") {
+        let (path, text) = split_two(rest);
+        return Ok(Assert::NotContains { path, text });
+    }
+    if let Some(rest) = strip_prefix_ci(line, "file_exists ") {
+        return Ok(Assert::FileExists {
+            path: unquote(rest),
+        });
+    }
+    if let Some(rest) = strip_prefix_ci(line, "file_not_exists ") {
+        return Ok(Assert::FileNotExists {
+            path: unquote(rest),
+        });
+    }
+    Ok(Assert::ExitZero)
+}
+
+fn strip_prefix_ci<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
+    if line.len() >= prefix.len() && line[..prefix.len()].eq_ignore_ascii_case(prefix) {
+        Some(&line[prefix.len()..])
+    } else {
+        None
+    }
+}
+
+fn split_two(s: &str) -> (String, String) {
+    let s = s.trim();
+    match s.split_once(char::is_whitespace) {
+        Some((a, b)) => (unquote(a), unquote(b)),
+        None => (unquote(s), String::new()),
+    }
+}
+
+fn looks_like_shell(line: &str) -> bool {
+    let t = line.trim();
+    t.starts_with("ls")
+        || t.starts_with("cat ")
+        || t.starts_with("pwd")
+        || t.starts_with("echo ")
+        || t.starts_with("git ")
+        || t.starts_with("python")
+        || t.starts_with("cargo ")
+        || t.starts_with("rg ")
+        || t.starts_with("grep ")
+}

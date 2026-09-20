@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="430" viewBox="0 0 1280 430" role="img" aria-labelledby="title desc">
+<title id="title">ICE — Clarity in motion</title><desc id="desc">The glacier blue ICE identity with FLOE, a pixel ice cube companion.</desc>
+<defs><pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#153140" stroke-width=".5"/></pattern><linearGradient id="fade"><stop stop-color="#061018"/><stop offset="1" stop-color="#0a202e"/></linearGradient></defs>
+<rect width="1280" height="430" rx="20" fill="url(#fade)"/><rect x="780" width="500" height="430" fill="url(#grid)"/>
+<path d="M48 48H1232M48 380H1232" stroke="#1c485c"/>
+<g font-family="ui-monospace,Consolas,monospace"><text x="58" y="85" font-size="14" fill="#6e9cb0" letter-spacing="4">ICE / FLOE EDITION</text><text x="52" y="204" font-size="116" fill="#e2f4fc" font-weight="700" letter-spacing="-6">ICE</text><text x="58" y="260" font-size="32" fill="#a0ecff">Clarity in motion.</text><text x="58" y="310" font-size="17" fill="#6e9cb0">INTENT. COMPILE. EXECUTE.</text><text x="58" y="406" font-size="12" fill="#6e9cb0" letter-spacing="2">YOUR TERMINAL. YOUR MODELS. YOUR NEXT MOVE.</text></g>
+<g transform="translate(863 66) scale(1.23)"><ellipse cx="103" cy="221" rx="72" ry="9" fill="#07151f"/>
+<path d="M24 74H40V58H56V42H152V58H168V74L136 106H24Z" fill="#a0ecff"/>
+<path d="M136 106H152V90H168V74H184V162H168V178H152V194H136Z" fill="#2078a0"/>
+<path d="M24 106H136V194H24Z" fill="#50d2ff"/><path d="M36 114H48V134H36Z" fill="#e2f4fc"/>
+<path d="M56 138H68V154H56ZM104 138H116V154H104ZM78 173H96V179H78Z" fill="#061018"/>
+</g><g transform="translate(795 290)"><path d="M0 12 12 0H42L50 12V40H0Z" fill="#a0ecff"/><path d="M38 18 50 12V40L38 46Z" fill="#2078a0"/><path d="M0 18H38V46H0Z" fill="#50d2ff"/><path d="M8 28H13V34H8ZM24 28H29V34H24Z" fill="#061018"/></g>
+<path d="M1184 115V131M1176 123H1192M800 130V142M794 136H806" stroke="#a0ecff" stroke-width="2"/>
+</svg>

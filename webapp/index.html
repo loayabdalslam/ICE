@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ICE Freeze — tiny task board</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="brand">ICE</div>
+      <p>Freeze a goal. Compile a burst. Melt the backlog.</p>
+    </header>
+    <form id="add">
+      <input id="title" placeholder="new task…" autocomplete="off" />
+      <button type="submit">freeze</button>
+    </form>
+    <ul id="list"></ul>
+    <footer>
+      <span id="stats">0 open</span>
+      <button id="clear" type="button">melt done</button>
+    </footer>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

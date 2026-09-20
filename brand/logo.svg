@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="216" viewBox="0 0 640 216"><path d="M32 72 64 40H152L184 72 152 104H32Z" fill="#a0ecff"/>
+<path d="M152 104 184 72V160L152 192Z" fill="#2078a0"/>
+<path d="M32 104H152V192H32Z" fill="#50d2ff"/>
+<path d="M44 112H52V132H44Z" fill="#e2f4fc"/>
+<path d="M66 136H78V150H66ZM114 136H126V150H114ZM88 168H106V174H88Z" fill="#061018"/><text x="238" y="161" font-family="Consolas, monospace" font-size="126" font-weight="700" fill="#e2f4fc">ICE</text></svg>

@@ -1,0 +1,184 @@
+{
+  "agent": "ICE",
+  "mode": "harness-only (no LLM)",
+  "host": "hds-6p2hm9ztolsk",
+  "cpu": 2,
+  "rss_mb_start": 73.21,
+  "benches": {
+    "startup_import_engine_ms": {
+      "n": 1,
+      "ms_min": 0.003,
+      "ms_p50": 0.003,
+      "ms_mean": 0.003,
+      "ms_max": 0.003
+    },
+    "burst_parse_ms": {
+      "n": 200,
+      "ms_min": 0.002,
+      "ms_p50": 0.003,
+      "ms_mean": 0.003,
+      "ms_max": 0.026
+    },
+    "tool_call_echo_ms": {
+      "n": 50,
+      "ms_min": 4.295,
+      "ms_p50": 4.847,
+      "ms_mean": 5.512,
+      "ms_max": 13.676
+    },
+    "tool_call_overhead_parse_exec_ms": {
+      "n": 40,
+      "ms_min": 4.367,
+      "ms_p50": 5.339,
+      "ms_mean": 5.417,
+      "ms_max": 7.689
+    },
+    "process_spawn_true_ms": {
+      "n": 80,
+      "ms_min": 0.983,
+      "ms_p50": 1.15,
+      "ms_mean": 1.239,
+      "ms_max": 5.116
+    },
+    "parallel_true": {
+      "10": 12.828,
+      "50": 73.568,
+      "100": 106.255
+    },
+    "file_write_2k_ms": {
+      "n": 1,
+      "ms_min": 141.427,
+      "ms_p50": 141.427,
+      "ms_mean": 141.427,
+      "ms_max": 141.427
+    },
+    "file_read_2k_ms": {
+      "n": 3,
+      "ms_min": 23.676,
+      "ms_p50": 26.109,
+      "ms_mean": 26.839,
+      "ms_max": 30.732
+    },
+    "file_search_python_ms": {
+      "n": 3,
+      "ms_min": 26.27,
+      "ms_p50": 27.148,
+      "ms_mean": 26.863,
+      "ms_max": 27.172
+    },
+    "file_search_rg_ms": {
+      "n": 5,
+      "ms_min": 10.812,
+      "ms_p50": 13.663,
+      "ms_mean": 14.491,
+      "ms_max": 19.667
+    },
+    "patch_apply_200_ms": {
+      "n": 1,
+      "ms_min": 18.124,
+      "ms_p50": 18.124,
+      "ms_mean": 18.124,
+      "ms_max": 18.124
+    },
+    "diff_generation_200_ms": {
+      "n": 3,
+      "ms_min": 5.959,
+      "ms_p50": 6.699,
+      "ms_mean": 6.469,
+      "ms_max": 6.75
+    },
+    "git_init_add_commit_status_branch_ms": 37.049,
+    "json_roundtrip_ms": {
+      "n": 200,
+      "ms_min": 0.151,
+      "ms_p50": 0.16,
+      "ms_mean": 0.171,
+      "ms_max": 0.456
+    },
+    "timeout_0.2s_sleep2": {
+      "fired": true,
+      "ms_mean": 201.896
+    },
+    "cancel_sleep_ms": {
+      "n": 8,
+      "ms_min": 1.266,
+      "ms_p50": 1.314,
+      "ms_mean": 1.331,
+      "ms_max": 1.498
+    },
+    "retry_3_empty_ms": {
+      "n": 200,
+      "ms_min": 0.0,
+      "ms_p50": 0.001,
+      "ms_mean": 0.001,
+      "ms_max": 0.005
+    },
+    "isolation_two_workspaces": {
+      "a": "A",
+      "b": "B",
+      "isolated": true
+    },
+    "context_load_src_rs_ms": {
+      "n": 5,
+      "ms_min": 2.904,
+      "ms_p50": 3.548,
+      "ms_mean": 3.487,
+      "ms_max": 4.043
+    },
+    "context_src_bytes": 143105,
+    "stream_first_chunk_ms": {
+      "ms_p50": 11.214,
+      "ms_mean": 11.421
+    },
+    "backpressure_2mb_stdout_ms": {
+      "n": 3,
+      "ms_min": 16.053,
+      "ms_p50": 17.446,
+      "ms_mean": 24.718,
+      "ms_max": 40.656
+    },
+    "error_propagation_exit7": {
+      "code": 7,
+      "n": 30,
+      "ms_min": 4.303,
+      "ms_p50": 4.624,
+      "ms_mean": 5.12,
+      "ms_max": 10.895
+    },
+    "cleanup_500_files_ms": {
+      "n": 5,
+      "ms_min": 0.129,
+      "ms_p50": 0.157,
+      "ms_mean": 1.055,
+      "ms_max": 4.694
+    },
+    "disk_dot_ice_bytes": 4622,
+    "assert_contains": {
+      "ok": true,
+      "detail": [
+        [
+          "contains hello.txt",
+          true,
+          "yes"
+        ]
+      ]
+    },
+    "queue_100_serial_ms": {
+      "n": 3,
+      "ms_min": 107.314,
+      "ms_p50": 111.425,
+      "ms_mean": 111.888,
+      "ms_max": 116.926
+    },
+    "queue_100_pool8_ms": {
+      "n": 3,
+      "ms_min": 74.713,
+      "ms_p50": 80.993,
+      "ms_mean": 83.675,
+      "ms_max": 95.319
+    }
+  },
+  "rss_mb_end": 73.21,
+  "rss_mb_delta": 0.0,
+  "work": "/tmp/ice-hbench-xeit59wo"
+}
