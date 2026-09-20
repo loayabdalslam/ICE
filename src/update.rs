@@ -13,9 +13,7 @@ use std::time::Duration;
 pub fn base_url() -> String {
     std::env::var("ICE_UPDATE_BASE_URL")
         .or_else(|_| std::env::var("ICE_BASE_URL"))
-        .unwrap_or_else(|_| {
-            "https://raw.githubusercontent.com/loayabdalslam/ice-binaries/main".into()
-        })
+        .unwrap_or_else(|_| "https://raw.githubusercontent.com/loayabdalslam/ICE/main".into())
         .trim_end_matches('/')
         .to_string()
 }

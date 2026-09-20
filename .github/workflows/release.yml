@@ -1,0 +1,125 @@
+name: release
+
+# Build ICE for every supported platform and publish the binaries into
+# releases/<version>/ (plus SHA256SUMS.txt and LATEST) so the install scripts
+# and the in-app auto-updater can fetch them from raw.githubusercontent.com.
+#
+# Trigger by pushing a tag like v0.3.0, or run manually and type the version.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 0.3.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: resolve
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: windows-x86_64
+            bin: ice.exe
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            asset: linux-x86_64
+            bin: ice
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            asset: linux-aarch64
+            bin: ice
+          - os: macos-13
+            target: x86_64-apple-darwin
+            asset: macos-x86_64
+            bin: ice
+          - os: macos-14
+            target: aarch64-apple-darwin
+            asset: macos-aarch64
+            bin: ice
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: rustup update stable && rustup default stable && rustup target add ${{ matrix.target }}
+      - name: Install Linux cross tooling
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-musl" ]; then
+            sudo apt-get install -y musl-tools
+          elif [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+            mkdir -p .cargo
+            printf '[target.aarch64-unknown-linux-gnu]\nlinker = "aarch64-linux-gnu-gcc"\n' >> .cargo/config.toml
+          fi
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Stage artifact
+        shell: bash
+        run: |
+          mkdir -p out/${{ matrix.asset }}
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "out/${{ matrix.asset }}/${{ matrix.bin }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: out/${{ matrix.asset }}/${{ matrix.bin }}
+
+  publish:
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: staged
+      - name: Assemble release tree
+        run: |
+          VERSION="${{ needs.resolve.outputs.version }}"
+          DEST="releases/$VERSION"
+          mkdir -p "$DEST"
+          : > "$DEST/SHA256SUMS.txt"
+          for dir in staged/*/; do
+            asset="$(basename "$dir")"
+            file="$(ls "$dir")"
+            mkdir -p "$DEST/$asset"
+            cp "$dir/$file" "$DEST/$asset/$file"
+            hash="$(sha256sum "$DEST/$asset/$file" | cut -d' ' -f1)"
+            printf '%s  %s/%s\n' "$hash" "$asset" "$file" >> "$DEST/SHA256SUMS.txt"
+          done
+          sort -o "$DEST/SHA256SUMS.txt" "$DEST/SHA256SUMS.txt"
+          printf '%s\n' "$VERSION" > LATEST
+          echo "--- $DEST/SHA256SUMS.txt ---"; cat "$DEST/SHA256SUMS.txt"
+      - name: Commit binaries to main
+        run: |
+          VERSION="${{ needs.resolve.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f "releases/$VERSION" LATEST
+          git commit -m "release: publish ICE $VERSION binaries for all platforms" || echo "nothing to commit"
+          git push origin main
