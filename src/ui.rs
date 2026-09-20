@@ -366,6 +366,85 @@ fn draw_session(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
+/// Map an ICE step title ("read foo.rs", "run ls -la") to Claude-style
+/// (ToolName, args) — e.g. ("Read", "foo.rs"), ("Bash", "ls -la").
+fn tool_display(title: &str) -> (String, String) {
+    let (verb, rest) = match title.split_once(char::is_whitespace) {
+        Some((v, r)) => (v, r.trim()),
+        None => (title, ""),
+    };
+    let name = match verb {
+        "read" => "Read",
+        "write" => "Write",
+        "replace" | "patch" => "Update",
+        "list" | "ls" => "List",
+        "grep" => "Grep",
+        "run" | "exec" | "sh" | "bash" => "Bash",
+        "web_search" | "websearch" => "Search",
+        "web_fetch" | "webfetch" | "fetch" => "Fetch",
+        "mcp" | "tool" => "MCP",
+        "skill" => "Skill",
+        "todo" => "Todo",
+        "agent" => "Task",
+        other => return (title_case(other), rest.to_string()),
+    };
+    (name.to_string(), rest.to_string())
+}
+
+fn title_case(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => s.to_string(),
+    }
+}
+
+/// Build a Claude-style result summary + output preview from a step body.
+/// Body is "exit <n> · <ms>ms" optionally followed by output lines.
+fn tool_result(name: &str, body: &str, ok: bool) -> (String, Vec<String>) {
+    let mut lines = body.lines();
+    let head = lines.next().unwrap_or("");
+    let output: Vec<String> = lines.map(|l| l.to_string()).collect();
+    let n = output.len();
+    let summary = match name {
+        "Read" => format!("Read {n} line{}", plural(n)),
+        "List" => format!("{n} entr{}", if n == 1 { "y" } else { "ies" }),
+        "Grep" | "Search" => format!("{n} result{}", plural(n)),
+        "Write" | "Update" => output
+            .first()
+            .cloned()
+            .unwrap_or_else(|| if ok { "done".into() } else { head.to_string() }),
+        "Bash" | "Fetch" | "MCP" => {
+            if n == 0 {
+                if ok { head.to_string() } else { format!("{head} (failed)") }
+            } else {
+                format!("{n} line{}", plural(n))
+            }
+        }
+        _ => {
+            if n == 0 {
+                head.to_string()
+            } else {
+                output[0].clone()
+            }
+        }
+    };
+    // Preview: reads/lists stay collapsed; commands/searches show output.
+    let preview = match name {
+        "Read" | "List" | "Write" | "Update" => Vec::new(),
+        _ => output,
+    };
+    (summary, preview)
+}
+
+fn plural(n: usize) -> &'static str {
+    if n == 1 {
+        ""
+    } else {
+        "s"
+    }
+}
+
 /// Render a lightweight-markdown body into styled lines: fenced code blocks,
 /// `#` headings, `-`/`*`/numbered bullets, `>` quotes, and inline `**bold**`
 /// and `` `code` ``. Keeps ICE's theme; no external markdown dependency.
@@ -479,17 +558,15 @@ fn render_msg(out: &mut Vec<Line<'static>>, msg: &crate::app::Msg, t: &crate::th
             out.push(blank());
         }
         MsgKind::Thinking => {
-            let head = if msg.title.trim().is_empty() || msg.title == "think" {
-                "thinking".to_string()
-            } else {
-                msg.title.clone()
-            };
             out.push(Line::from(Span::styled(
-                format!("✳ {head}"),
+                "✻ Thinking…".to_string(),
                 Style::default().fg(t.muted).add_modifier(Modifier::ITALIC),
             )));
             for row in msg.body.lines() {
-                out.push(Line::from(Span::styled(format!("  {row}"), dim)));
+                out.push(Line::from(Span::styled(
+                    format!("  {row}"),
+                    Style::default().fg(t.muted).add_modifier(Modifier::ITALIC),
+                )));
             }
             out.push(blank());
         }
@@ -512,22 +589,25 @@ fn render_msg(out: &mut Vec<Line<'static>>, msg: &crate::app::Msg, t: &crate::th
         }
         MsgKind::Step { ok } => {
             let color = if ok { t.ok } else { t.err };
-            // Tool call: glyph carries status, command shown in gray.
-            out.push(Line::from(vec![
+            let (name, args) = tool_display(&msg.title);
+            // Claude-style header: ● Name(args)
+            let mut header = vec![
                 Span::styled("⏺ ", Style::default().fg(color)),
-                Span::styled(msg.title.clone(), dim),
-            ]));
-            let mut body_lines = msg.body.lines();
-            if let Some(summary) = body_lines.next() {
-                out.push(Line::from(Span::styled(format!("  ⎿ {summary}"), dim)));
+                Span::styled(name.clone(), Style::default().fg(t.text).add_modifier(Modifier::BOLD)),
+            ];
+            if !args.is_empty() {
+                header.push(Span::styled(format!("({args})"), dim));
             }
-            let rest: Vec<&str> = body_lines.collect();
-            for l in rest.iter().take(6) {
-                out.push(Line::from(Span::styled(format!("    {l}"), dim)));
+            out.push(Line::from(header));
+            // Result: ⎿ <smart summary>, then a short output preview.
+            let (summary, preview) = tool_result(&name, &msg.body, ok);
+            out.push(Line::from(Span::styled(format!("  ⎿ {summary}"), dim)));
+            for l in preview.iter().take(6) {
+                out.push(Line::from(Span::styled(format!("     {l}"), dim)));
             }
-            if rest.len() > 6 {
+            if preview.len() > 6 {
                 out.push(Line::from(Span::styled(
-                    format!("    … +{} more lines", rest.len() - 6),
+                    format!("     … +{} lines", preview.len() - 6),
                     dim,
                 )));
             }
@@ -574,11 +654,12 @@ fn render_msg(out: &mut Vec<Line<'static>>, msg: &crate::app::Msg, t: &crate::th
         }
         MsgKind::Agent => {
             out.push(Line::from(vec![
-                Span::styled("◆ ", Style::default().fg(t.ice)),
-                Span::styled(msg.title.clone(), Style::default().fg(t.ice)),
+                Span::styled("⏺ ", Style::default().fg(t.ice)),
+                Span::styled("Task", Style::default().fg(t.text).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("({})", msg.title), dim),
             ]));
-            for row in msg.body.lines() {
-                out.push(Line::from(Span::styled(format!("  {row}"), dim)));
+            for row in msg.body.lines().take(8) {
+                out.push(Line::from(Span::styled(format!("  ⎿ {row}"), dim)));
             }
             out.push(blank());
         }
