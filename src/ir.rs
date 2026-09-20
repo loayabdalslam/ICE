@@ -259,8 +259,54 @@ fn action_from_call(name: &str, params: &[(String, String)]) -> Option<Action> {
                 cmd: pick(params, &["command", "cmd", "script", "code"])?,
             })
         }
-        _ => None,
+        "mcp" | "call_tool" | "use_tool" | "tool" | "mcp_call" => Some(Action::Mcp {
+            tool: pick(params, &["tool", "name", "server_tool", "qualified"]).unwrap_or_default(),
+            args: pick(params, &["args", "arguments", "input", "params"])
+                .unwrap_or_else(|| params_to_json(params)),
+        }),
+        "skill" | "use_skill" | "load_skill" | "apply_skill" => Some(Action::Skill {
+            name: pick(params, &["name", "skill", "id"])?,
+        }),
+        "agent" | "spawn" | "subagent" | "delegate" | "task" => Some(Action::Agent {
+            name: slug(&pick(params, &["name", "type", "agent", "role"]).unwrap_or_else(|| "worker".into())),
+            goal: pick(params, &["goal", "task", "prompt", "instructions", "description"])
+                .unwrap_or_default(),
+        }),
+        "todo" | "add_todo" | "todo_add" => Some(Action::TodoAdd {
+            text: pick(params, &["text", "task", "todo", "item"])?,
+        }),
+        "yield" | "ask" | "ask_user" | "need_input" | "finish" | "done" => Some(Action::Yield {
+            reason: pick(params, &["reason", "question", "message", "summary"])
+                .unwrap_or_else(|| "decision required".into()),
+        }),
+        _ => {
+            // Unknown function: route it to MCP so ICE can drive any tool a
+            // model invents, in any format. Qualified names (server/tool or
+            // server__tool) pass through; bare names hit the first server.
+            if name.is_empty() {
+                None
+            } else {
+                let tool = name.replace("__", "/");
+                Some(Action::Mcp {
+                    tool,
+                    args: params_to_json(params),
+                })
+            }
+        }
     }
+}
+
+fn params_to_json(params: &[(String, String)]) -> String {
+    let map: serde_json::Map<String, serde_json::Value> = params
+        .iter()
+        .map(|(k, v)| {
+            // Keep JSON values as-is when the param already holds JSON.
+            let val = serde_json::from_str::<serde_json::Value>(v)
+                .unwrap_or_else(|_| serde_json::Value::String(v.clone()));
+            (k.clone(), val)
+        })
+        .collect();
+    serde_json::Value::Object(map).to_string()
 }
 
 fn infer_asserts(actions: &[Action]) -> Vec<Assert> {
@@ -635,5 +681,34 @@ mod tests {
         let raw = "GOAL: x\nBURST:\n  write a.txt\n  <<\nhi\n  >>\nASSERT:\n  file_exists a.txt\n";
         let b = Burst::parse(raw).unwrap();
         assert!(matches!(b.actions[0], Action::Write { .. }));
+    }
+}
+
+#[cfg(test)]
+mod call_routing_tests {
+    use super::*;
+
+    #[test]
+    fn mcp_and_skill_and_agent_calls_route() {
+        let raw = "<function=mcp><parameter=tool>fs/read</parameter><parameter=args>{\"p\":1}</parameter></function>";
+        assert!(matches!(Burst::parse(raw).unwrap().actions[0], Action::Mcp { .. }));
+
+        let raw = "<function=use_skill><parameter=name>pdf</parameter></function>";
+        assert!(matches!(Burst::parse(raw).unwrap().actions[0], Action::Skill { .. }));
+
+        let raw = "<function=agent><parameter=type>explore</parameter><parameter=goal>map src</parameter></function>";
+        assert!(matches!(Burst::parse(raw).unwrap().actions[0], Action::Agent { .. }));
+    }
+
+    #[test]
+    fn unknown_function_becomes_mcp_call() {
+        let raw = "<function=weather__lookup><parameter=city>Cairo</parameter></function>";
+        match &Burst::parse(raw).unwrap().actions[0] {
+            Action::Mcp { tool, args } => {
+                assert_eq!(tool, "weather/lookup");
+                assert!(args.contains("Cairo"));
+            }
+            other => panic!("expected Mcp, got {other:?}"),
+        }
     }
 }

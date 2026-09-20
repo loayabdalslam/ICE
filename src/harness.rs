@@ -285,12 +285,13 @@ fn run_ice_turns(
                         goal: ag.clone(),
                     });
                     let step = agents::run_subagent(&job.root, name, ag, job.demo, 2);
+                    // Present via AgentDone only (keeps the board uncluttered);
+                    // the step still feeds verify/delta below.
                     send(Event::AgentDone {
                         name: name.clone(),
                         ok: step.ok,
                         summary: step.output.clone(),
                     });
-                    send(Event::Step(step.clone()));
                     steps.push(step);
                 }
                 _ => {

@@ -589,7 +589,7 @@ impl App {
 
     fn cmd_agent(&mut self, arg: &str) {
         if arg.is_empty() {
-            self.push_sys("/agent <name>: <goal>   or   /agent research the repo");
+            self.push_sys(&crate::agents::catalog());
             return;
         }
         let action = match arg.split_once(':') {
@@ -691,7 +691,8 @@ impl App {
 
     fn cmd_agents(&mut self) {
         let dir = self.root.join(".ice/agents");
-        let mut body = String::from("subagents on disk:\n");
+        let mut body = crate::agents::catalog();
+        body.push_str("\nsubagent reports on disk:\n");
         match std::fs::read_dir(&dir) {
             Ok(rd) => {
                 let mut any = false;

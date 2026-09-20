@@ -76,7 +76,28 @@ impl Llm {
             bail!("llm error: {err}");
         }
         let msg = &raw["choices"][0]["message"];
-        let content = msg["content"].as_str().unwrap_or("").to_string();
+        let mut content = msg["content"].as_str().unwrap_or("").to_string();
+        // Native OpenAI tool calls arrive in message.tool_calls, not content.
+        // Normalize them into markup the burst parser understands.
+        if let Some(calls) = msg.get("tool_calls").and_then(|x| x.as_array()) {
+            for c in calls {
+                let f = c.get("function").unwrap_or(c);
+                let name = f.get("name").and_then(|x| x.as_str()).unwrap_or("");
+                let args = f
+                    .get("arguments")
+                    .map(|a| match a {
+                        Value::String(s) => {
+                            serde_json::from_str::<Value>(s).unwrap_or(Value::Null)
+                        }
+                        other => other.clone(),
+                    })
+                    .unwrap_or(Value::Null);
+                if !name.is_empty() {
+                    content.push('\n');
+                    content.push_str(&tool_call_markup(name, &args));
+                }
+            }
+        }
         let thinking = msg
             .get("reasoning_content")
             .and_then(|x| x.as_str())
@@ -107,11 +128,20 @@ impl Llm {
         if let Some(arr) = raw.get("content").and_then(|c| c.as_array()) {
             for block in arr {
                 let kind = block.get("type").and_then(|x| x.as_str()).unwrap_or("");
-                let text = block.get("text").and_then(|x| x.as_str()).unwrap_or("");
-                if kind == "thinking" {
-                    thinking.push_str(text);
-                } else {
-                    content.push_str(text);
+                match kind {
+                    "thinking" => {
+                        thinking.push_str(block.get("text").and_then(|x| x.as_str()).unwrap_or(""))
+                    }
+                    // Anthropic native tool call block.
+                    "tool_use" => {
+                        let name = block.get("name").and_then(|x| x.as_str()).unwrap_or("");
+                        let input = block.get("input").cloned().unwrap_or(Value::Null);
+                        if !name.is_empty() {
+                            content.push('\n');
+                            content.push_str(&tool_call_markup(name, &input));
+                        }
+                    }
+                    _ => content.push_str(block.get("text").and_then(|x| x.as_str()).unwrap_or("")),
                 }
             }
         }
@@ -147,6 +177,23 @@ fn curl_json(url: &str, key: &str, body: &Value, extra_headers: &[String]) -> Re
         bail!("curl failed: {}", String::from_utf8_lossy(&out.stderr));
     }
     serde_json::from_slice(&out.stdout).context("llm json")
+}
+
+/// Render a native tool call as the `<function=…><parameter=…>` markup that
+/// `Burst::parse` normalizes — one code path for every provider's format.
+pub fn tool_call_markup(name: &str, args: &Value) -> String {
+    let mut s = format!("<function={name}>");
+    if let Some(obj) = args.as_object() {
+        for (k, v) in obj {
+            let val = match v {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            s.push_str(&format!("<parameter={k}>{val}</parameter>"));
+        }
+    }
+    s.push_str("</function>");
+    s
 }
 
 fn split_think(content: String, mut thinking: String) -> Completion {
@@ -205,6 +252,10 @@ Rules:
 - Every mutation burst MUST have an ASSERT.
 - If you cannot proceed, emit yield.
 - Available extra actions: skill <name> · mcp <server/tool> {json} · todo <text> · todo_done <id>
+- Delegate heavy or parallel work to a subagent: `agent <type>: <goal>`.
+  Types: explore (read-only search), plan (read-only), review (read-only),
+  build (edits files), general. A subagent runs in its own context and returns
+  a short report, so use one to keep this context small.
 
 When the user asks you to build something (a website, a page, a script, an app):
 - Actually WRITE the files with real, complete contents using the write action.
