@@ -74,17 +74,17 @@ The same commands upgrade to the release named in [`LATEST`](LATEST). Open a new
 
 | Platform | Download | Verification |
 | --- | --- | --- |
-| Windows x64 | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.2.0/windows-x86_64/ice.exe) | Executed and installed on Windows |
-| Linux x64 | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.2.0/linux-x86_64/ice) | Cross-compiled; native execution pending |
-| Linux ARM64 | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.2.0/linux-aarch64/ice) | Cross-compiled; native execution pending |
-| macOS Intel | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.2.0/macos-x86_64/ice) | Cross-compiled; native execution pending |
-| macOS Apple Silicon | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.2.0/macos-aarch64/ice) | Cross-compiled; native execution pending |
+| Windows x64 | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.3.0/windows-x86_64/ice.exe) | Built with the release profile; executed and installed on Windows |
+| Linux x64 | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.3.0/linux-x86_64/ice) | Built & published by CI on each tagged release |
+| Linux ARM64 | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.3.0/linux-aarch64/ice) | Built & published by CI on each tagged release |
+| macOS Intel | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.3.0/macos-x86_64/ice) | Built & published by CI on each tagged release |
+| macOS Apple Silicon | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.3.0/macos-aarch64/ice) | Built & published by CI on each tagged release |
 
 **Requirements:** a Unicode terminal; `curl` for API calls; Bash for shell actions. On Windows, install [Git for Windows](https://gitforwindows.org/) and make `bash.exe` available on PATH. Linux builds use musl to avoid a system glibc dependency. macOS builds require macOS 11 or newer. Windows ARM64 uses the x64 build through Windows emulation.
 
 **Display:** 120 columns × 40 rows is recommended; the minimum is 36 × 14. Narrow layouts prioritize the composer and conversation. A Nerd Font is not required.
 
-**Verification:** Windows execution and installation were exercised locally. Other platform binaries are cross-compiled; native execution status is recorded in [`docs/VERIFICATION.md`](docs/VERIFICATION.md). macOS binaries are not notarized, and Windows binaries are not Authenticode-signed.
+**Verification:** the Windows binary is built with the release profile and was executed and installed locally. Linux and macOS binaries are built and published for each target by GitHub Actions (`.github/workflows/release.yml`) on every tagged release, with a `SHA256SUMS.txt` the installer checks before running or replacing anything. macOS binaries are not notarized, and Windows binaries are not Authenticode-signed.
 
 ## First session
 
@@ -297,7 +297,7 @@ install.sh                  Linux / macOS auto-detection
 windows/install.ps1         Dedicated Windows entry point
 bash/install.sh             Dedicated Linux entry point
 mac/install.sh              Dedicated macOS entry point
-releases/0.2.0/             Binaries + checksums
+releases/0.3.0/             Binaries + checksums
 assets/                     Brand artwork + actual SVG icons
 docs/                       Setup, verification and website snippets
 licenses/                   Third-party notices

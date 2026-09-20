@@ -17,7 +17,13 @@ param(
     $recordPath = Join-Path $destination '.ice-install.json'
     if ($Uninstall) {
         if (-not (Test-Path -LiteralPath $recordPath)) { throw 'This directory has no ICE installation record.' }
-        $record = Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json
+        $record = try { Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json } catch { $null }
+        if (-not $record) {
+            if (Test-Path -LiteralPath $binary) { Remove-Item -LiteralPath $binary }
+            Remove-Item -LiteralPath $recordPath
+            Write-Host 'Removed ICE (installation record was unreadable; PATH left unchanged).' -ForegroundColor Cyan
+            return
+        }
         if ($record.directory -ine $destination) { throw 'Installation record does not match this directory.' }
         if (Test-Path -LiteralPath $binary) { Remove-Item -LiteralPath $binary }
         if ($record.pathAdded) {
@@ -64,7 +70,9 @@ param(
             & $download --version
             if ($LASTEXITCODE -ne 0) { throw 'The downloaded binary cannot run on this machine. Your installation was not changed.' }
         }
-        $previous = if (Test-Path -LiteralPath $recordPath) { Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json } else { $null }
+        $previous = if (Test-Path -LiteralPath $recordPath) {
+            try { Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json } catch { $null }
+        } else { $null }
         New-Item -ItemType Directory -Force -Path $destination | Out-Null
         $stage = Join-Path $destination ('.ice-new-' + [guid]::NewGuid().ToString('N') + '.exe')
         try {
