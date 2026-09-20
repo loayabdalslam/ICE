@@ -313,7 +313,7 @@ impl App {
             self.theme = n.palette();
             self.status = format!("theme {}", n.id());
         } else {
-            self.push_sys("themes: light (default) · ice · groknight · frost · ember · mono · solarized");
+            self.push_sys("themes: ice (default) · light · groknight · frost · ember · mono · solarized");
         }
     }
 

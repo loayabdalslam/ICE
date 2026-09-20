@@ -12,8 +12,8 @@ pub enum ThemeName {
 }
 
 impl ThemeName {
-    /// White/light is the default, first-listed theme.
-    pub const DEFAULT: ThemeName = ThemeName::Light;
+    /// ICE (glacier) is the default theme.
+    pub const DEFAULT: ThemeName = ThemeName::Ice;
 
     pub fn all() -> &'static [ThemeName] {
         &[
