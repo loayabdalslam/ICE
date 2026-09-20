@@ -333,8 +333,8 @@ fn run_loop(term: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) ->
                     }
                 }
                 _ if app.help => {}
-                KeyCode::PageUp => app.scroll = app.scroll.saturating_sub(10),
-                KeyCode::PageDown => app.scroll = app.scroll.saturating_add(10),
+                KeyCode::PageUp => app.scroll_up(10),
+                KeyCode::PageDown => app.scroll_down(10),
                 KeyCode::Home => app.cursor = 0,
                 KeyCode::End => app.cursor = app.input.len(),
                 KeyCode::Tab => app.on_tab(),
@@ -350,7 +350,7 @@ fn run_loop(term: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) ->
                             app.model_idx -= 1;
                         }
                     } else {
-                        app.scroll = app.scroll.saturating_sub(1);
+                        app.scroll_up(1);
                     }
                 }
                 KeyCode::Down => {
@@ -362,7 +362,7 @@ fn run_loop(term: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) ->
                             app.model_idx = (app.model_idx + 1).min(app.models.len() - 1);
                         }
                     } else {
-                        app.scroll = app.scroll.saturating_add(1);
+                        app.scroll_down(1);
                     }
                 }
                 KeyCode::Char(c) => app.insert(c),

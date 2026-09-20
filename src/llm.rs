@@ -224,6 +224,8 @@ BURST:
   list <path>
   grep <pattern> <path>
   run <shell command>
+  web_search <query>
+  web_fetch <url>
   write <path>
   <<
   file contents

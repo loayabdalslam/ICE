@@ -25,6 +25,12 @@ pub enum Action {
     Run {
         cmd: String,
     },
+    WebSearch {
+        query: String,
+    },
+    WebFetch {
+        url: String,
+    },
     Yield {
         reason: String,
     },
@@ -259,6 +265,16 @@ fn action_from_call(name: &str, params: &[(String, String)]) -> Option<Action> {
                 cmd: pick(params, &["command", "cmd", "script", "code"])?,
             })
         }
+        "web_search" | "websearch" | "web" | "google" | "ddg" | "search_web" | "browse" => {
+            Some(Action::WebSearch {
+                query: pick(params, &["query", "q", "text", "search", "term"])?,
+            })
+        }
+        "web_fetch" | "webfetch" | "fetch" | "open_url" | "fetch_url" | "get_url" => {
+            Some(Action::WebFetch {
+                url: pick(params, &["url", "link", "href", "uri"])?,
+            })
+        }
         "mcp" | "call_tool" | "use_tool" | "tool" | "mcp_call" => Some(Action::Mcp {
             tool: pick(params, &["tool", "name", "server_tool", "qualified"]).unwrap_or_default(),
             args: pick(params, &["args", "arguments", "input", "params"])
@@ -354,6 +370,18 @@ fn parse_action(lines: &[&str], i: usize) -> Result<(Action, usize)> {
         "run" | "exec" | "sh" | "bash" => Ok((
             Action::Run {
                 cmd: need_arg(&rest, "run")?,
+            },
+            i + 1,
+        )),
+        "web_search" | "websearch" | "web" | "google" | "ddg" => Ok((
+            Action::WebSearch {
+                query: need_arg(&rest, "web_search")?,
+            },
+            i + 1,
+        )),
+        "web_fetch" | "webfetch" | "fetch" | "open_url" | "curl_url" => Ok((
+            Action::WebFetch {
+                url: need_arg(&rest, "web_fetch")?,
             },
             i + 1,
         )),

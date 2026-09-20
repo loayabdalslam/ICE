@@ -1,6 +1,6 @@
 use crate::ir::Action;
 use crate::sandbox::{clip, deny_command, resolve};
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -30,6 +30,8 @@ pub fn run_action(root: &Path, action: &Action) -> StepResult {
             (format!("replace {path}"), replace_in(root, path, old, new))
         }
         Action::Run { cmd } => (format!("run {cmd}"), run_shell(root, cmd)),
+        Action::WebSearch { query } => (format!("web_search {query}"), web_search(query)),
+        Action::WebFetch { url } => (format!("web_fetch {url}"), web_fetch(url)),
         Action::Yield { reason } => (
             format!("yield {reason}"),
             Ok((0, format!("YIELD: {reason}"))),
@@ -179,6 +181,98 @@ fn replace_in(root: &Path, path: &str, old: &str, new: &str) -> Result<(i32, Str
     let updated = text.replacen(old, new, 1);
     fs::write(&p, &updated)?;
     Ok((0, format!("replaced in {}", p.display())))
+}
+
+/// Web search via DuckDuckGo's key-free JSON API. Returns an instant-answer
+/// abstract plus top related results (title + URL), suitable for agentic loops.
+fn web_search(query: &str) -> Result<(i32, String)> {
+    let enc = urlencode(query);
+    let url = format!("https://api.duckduckgo.com/?q={enc}&format=json&no_html=1&no_redirect=1&t=ice");
+    let out = Command::new("curl")
+        .args(["-sSL", "-A", "ice-agent/0.3", "--max-time", "20", &url])
+        .output()
+        .context("curl required for web search")?;
+    if !out.status.success() {
+        bail!("web search failed");
+    }
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or(serde_json::Value::Null);
+    let mut buf = String::new();
+    if let Some(a) = v.get("AbstractText").and_then(|x| x.as_str()) {
+        if !a.is_empty() {
+            let src = v.get("AbstractURL").and_then(|x| x.as_str()).unwrap_or("");
+            buf.push_str(&format!("{a}\n{src}\n\n"));
+        }
+    }
+    if let Some(ans) = v.get("Answer").and_then(|x| x.as_str()) {
+        if !ans.is_empty() {
+            buf.push_str(&format!("Answer: {ans}\n\n"));
+        }
+    }
+    let mut n = 0;
+    if let Some(topics) = v.get("RelatedTopics").and_then(|x| x.as_array()) {
+        for t in topics {
+            // Skip nested category groups.
+            let text = t.get("Text").and_then(|x| x.as_str());
+            let first = t.get("FirstURL").and_then(|x| x.as_str());
+            if let (Some(text), Some(first)) = (text, first) {
+                buf.push_str(&format!("{}. {text}\n   {first}\n", n + 1));
+                n += 1;
+                if n >= 8 {
+                    break;
+                }
+            }
+        }
+    }
+    if buf.trim().is_empty() {
+        return Ok((1, format!("no results for: {query}")));
+    }
+    Ok((0, buf))
+}
+
+/// Fetch a URL and return readable text (tags stripped, clipped).
+fn web_fetch(url: &str) -> Result<(i32, String)> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        bail!("web_fetch needs an http(s) URL");
+    }
+    let out = Command::new("curl")
+        .args(["-sSL", "-A", "ice-agent/0.3", "--max-time", "25", url])
+        .output()
+        .context("curl required for web fetch")?;
+    if !out.status.success() {
+        bail!("fetch failed: {url}");
+    }
+    let html = String::from_utf8_lossy(&out.stdout);
+    Ok((0, strip_html(&html)))
+}
+
+fn strip_html(html: &str) -> String {
+    // Drop script/style blocks, then tags, then collapse whitespace.
+    let re_block = regex::Regex::new(r"(?is)<(script|style)[^>]*>.*?</(script|style)>").unwrap();
+    let no_block = re_block.replace_all(html, " ");
+    let re_tag = regex::Regex::new(r"(?s)<[^>]+>").unwrap();
+    let text = re_tag.replace_all(&no_block, " ");
+    let text = text
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"");
+    let collapsed: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    collapsed.chars().take(4000).collect()
+}
+
+fn urlencode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            b' ' => out.push_str("%20"),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 fn run_shell(root: &Path, cmd: &str) -> Result<(i32, String)> {

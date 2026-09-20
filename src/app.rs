@@ -81,6 +81,10 @@ pub struct App {
     pub update_tx: Option<Sender<UpdateEvent>>,
     pub update_note: Option<String>,
     pub update_checking: bool,
+    pub follow: bool,
+    pub history: Vec<(String, String)>,
+    /// Last max scroll offset computed during render (for follow/auto-scroll).
+    pub max_scroll: std::cell::Cell<u16>,
 }
 
 impl App {
@@ -97,8 +101,8 @@ impl App {
             } else {
                 Screen::Welcome
             },
-            theme_name: ThemeName::Ice,
-            theme: Theme::ice(),
+            theme_name: ThemeName::DEFAULT,
+            theme: ThemeName::DEFAULT.palette(),
             input: String::new(),
             cursor: 0,
             messages: Vec::new(),
@@ -144,6 +148,27 @@ impl App {
             update_tx: None,
             update_note: None,
             update_checking: false,
+            follow: true,
+            history: Vec::new(),
+            max_scroll: std::cell::Cell::new(0),
+        }
+    }
+
+    /// Scroll the conversation up by `n` lines, leaving follow mode.
+    pub fn scroll_up(&mut self, n: u16) {
+        if self.follow {
+            self.follow = false;
+            self.scroll = self.max_scroll.get();
+        }
+        self.scroll = self.scroll.saturating_sub(n);
+    }
+
+    /// Scroll down by `n`; re-enter follow mode when reaching the bottom.
+    pub fn scroll_down(&mut self, n: u16) {
+        let max = self.max_scroll.get();
+        self.scroll = (self.scroll.saturating_add(n)).min(max);
+        if self.scroll >= max {
+            self.follow = true;
         }
     }
 
@@ -288,7 +313,7 @@ impl App {
             self.theme = n.palette();
             self.status = format!("theme {}", n.id());
         } else {
-            self.push_sys("themes: ice (default) · groknight · frost · ember · mono");
+            self.push_sys("themes: light (default) · ice · groknight · frost · ember · mono · solarized");
         }
     }
 
@@ -356,11 +381,35 @@ impl App {
             title: "you".into(),
             body: text.clone(),
         });
+        self.follow = true;
+        let ctx = self.history_context();
+        self.history.push(("user".into(), text.clone()));
         if is_conversational(&text) {
-            self.start_chat(text);
+            self.start_chat(text, ctx);
         } else {
-            self.start_job(text, false, None);
+            self.start_job(with_context(&text, ctx.as_deref()), false, None);
         }
+    }
+
+    /// Recent conversation, trimmed, to give the model continuity across turns.
+    fn history_context(&self) -> Option<String> {
+        if self.history.is_empty() {
+            return None;
+        }
+        let mut turns: Vec<String> = self
+            .history
+            .iter()
+            .rev()
+            .take(12)
+            .map(|(role, text)| format!("{role}: {text}"))
+            .collect();
+        turns.reverse();
+        let mut ctx = turns.join("\n");
+        if ctx.len() > 4000 {
+            let start = ctx.len() - 4000;
+            ctx = format!("…{}", &ctx[start..]);
+        }
+        Some(ctx)
     }
 
     fn slash(&mut self, cmd: &str) {
@@ -373,6 +422,7 @@ impl App {
             "/help" | "/?" => self.help = !self.help,
             "/new" | "/clear" => {
                 self.messages.clear();
+                self.history.clear();
                 self.turns = 0;
                 self.bursts = 0;
                 self.steps_ok = 0;
@@ -720,7 +770,7 @@ impl App {
         }
     }
 
-    fn start_chat(&mut self, text: String) {
+    fn start_chat(&mut self, text: String, ctx: Option<String>) {
         if self.screen == Screen::Welcome {
             self.screen = Screen::Session;
         }
@@ -731,7 +781,7 @@ impl App {
         self.status = "replying".into();
         let job = harness::Job {
             root: self.root.clone(),
-            goal: text,
+            goal: with_context(&text, ctx.as_deref()),
             prior_delta: None,
             max_turns: 1,
             demo: self.demo,
@@ -844,11 +894,17 @@ impl App {
                     };
                 }
                 Event::Assistant(t) => {
+                    self.history.push(("assistant".into(), t.clone()));
+                    if self.history.len() > 40 {
+                        let drain = self.history.len() - 40;
+                        self.history.drain(0..drain);
+                    }
                     self.messages.push(Msg {
                         kind: MsgKind::Assistant,
                         title: "ice".into(),
                         body: t,
                     });
+                    self.follow = true;
                 }
                 Event::Loop { pass, max, note } => {
                     self.loop_pass = pass;
@@ -949,6 +1005,16 @@ fn is_conversational(text: &str) -> bool {
     }
     // Very short, no action signal → chat.
     words <= 4
+}
+
+/// Prepend recent conversation to a prompt so turns build on each other.
+fn with_context(text: &str, ctx: Option<&str>) -> String {
+    match ctx {
+        Some(c) if !c.trim().is_empty() => {
+            format!("Conversation so far:\n{c}\n\nCurrent message:\n{text}")
+        }
+        _ => text.to_string(),
+    }
 }
 
 fn session_id() -> String {

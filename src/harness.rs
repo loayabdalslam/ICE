@@ -101,8 +101,16 @@ fn run_outer_loop(job: &Job, send: &dyn Fn(Event)) -> Result<()> {
         done: false,
     });
 
-    let max = durable.max_loops.max(1);
-    let mut fails_in_a_row = 0u32;
+    // Persist until the goal is truly done. Keep going while progress is made;
+    // only bail after several consecutive passes that changed nothing, so we
+    // don't burn the quota looping on an identical error forever.
+    let max = durable.max_loops.max(1).max(30);
+    let stall_limit: u32 = std::env::var("ICE_STALL_LIMIT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(6);
+    let mut stalls = 0u32;
+    let mut prev_progress = String::new();
     for pass in 1..=max {
         if durable.is_done(&job.root) {
             durable.open = false;
@@ -133,15 +141,18 @@ fn run_outer_loop(job: &Job, send: &dyn Fn(Event)) -> Result<()> {
             durable.text
         );
         let closed = run_ice_turns(job, send, &inner_goal, prior, 3, Some(pass)).unwrap_or(false);
-        if closed {
-            fails_in_a_row = 0;
+        // Progress = the durable progress log changed this pass.
+        let now_progress = DurableGoal::read_progress(&job.root);
+        if closed || now_progress != prev_progress {
+            stalls = 0;
         } else {
-            fails_in_a_row += 1;
+            stalls += 1;
         }
-        if fails_in_a_row >= 2 && !durable.is_done(&job.root) {
-            send(Event::Assistant(
-                "Stopping the goal loop: two passes made no progress. Refine the goal, switch model (/models), or use /demo.".into(),
-            ));
+        prev_progress = now_progress;
+        if stalls >= stall_limit && !durable.is_done(&job.root) {
+            send(Event::Assistant(format!(
+                "Paused after {stalls} passes with no change — likely blocked. I kept the goal open; run /loop to resume, refine it, or switch model (/models)."
+            )));
             send(Event::Done {
                 turns: pass,
                 ok: false,

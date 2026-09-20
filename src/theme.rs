@@ -2,62 +2,71 @@ use ratatui::style::{Color, Modifier, Style};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ThemeName {
+    Light,
     Ice,
     GrokNight,
     Frost,
     Ember,
     Mono,
+    Solarized,
 }
 
 impl ThemeName {
+    /// White/light is the default, first-listed theme.
+    pub const DEFAULT: ThemeName = ThemeName::Light;
+
     pub fn all() -> &'static [ThemeName] {
         &[
+            ThemeName::Light,
             ThemeName::Ice,
             ThemeName::GrokNight,
             ThemeName::Frost,
             ThemeName::Ember,
             ThemeName::Mono,
+            ThemeName::Solarized,
         ]
     }
 
     pub fn id(self) -> &'static str {
         match self {
+            ThemeName::Light => "light",
             ThemeName::Ice => "ice",
             ThemeName::GrokNight => "groknight",
             ThemeName::Frost => "frost",
             ThemeName::Ember => "ember",
             ThemeName::Mono => "mono",
+            ThemeName::Solarized => "solarized",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
-            "ice" | "default" => Some(Self::Ice),
+            "light" | "white" | "day" | "default" => Some(Self::Light),
+            "ice" => Some(Self::Ice),
             "grok" | "groknight" | "night" => Some(Self::GrokNight),
             "frost" | "blue" => Some(Self::Frost),
             "ember" | "warm" => Some(Self::Ember),
             "mono" | "bw" => Some(Self::Mono),
+            "solarized" | "solar" => Some(Self::Solarized),
             _ => None,
         }
     }
 
     pub fn next(self) -> Self {
-        match self {
-            Self::Ice => Self::GrokNight,
-            Self::GrokNight => Self::Frost,
-            Self::Frost => Self::Ember,
-            Self::Ember => Self::Mono,
-            Self::Mono => Self::Ice,
-        }
+        let all = Self::all();
+        let i = all.iter().position(|t| *t == self).unwrap_or(0);
+        all[(i + 1) % all.len()]
     }
 
     pub fn palette(self) -> Theme {
         match self {
+            Self::Light => Theme::light(),
             Self::Ice => Theme::ice(),
             Self::GrokNight => Theme::grok_night(),
             Self::Frost => Theme::frost(),
             Self::Ember => Theme::ember(),
             Self::Mono => Theme::mono(),
+            Self::Solarized => Theme::solarized(),
         }
     }
 }
@@ -80,7 +89,45 @@ pub struct Theme {
 }
 
 impl Theme {
-    /// Default ICE theme: deep navy + glacier cyan.
+    /// Default light/white theme: paper background, ink text, glacier accent.
+    pub fn light() -> Self {
+        Self {
+            bg: Color::Rgb(250, 251, 252),
+            surface: Color::Rgb(240, 243, 246),
+            border: Color::Rgb(210, 218, 224),
+            border_focus: Color::Rgb(20, 140, 190),
+            text: Color::Rgb(24, 34, 44),
+            muted: Color::Rgb(110, 124, 138),
+            accent: Color::Rgb(10, 132, 178),
+            accent_dim: Color::Rgb(150, 195, 215),
+            ok: Color::Rgb(20, 150, 100),
+            warn: Color::Rgb(180, 120, 20),
+            err: Color::Rgb(200, 50, 70),
+            ice: Color::Rgb(30, 150, 200),
+            user: Color::Rgb(40, 90, 150),
+        }
+    }
+
+    /// Solarized-light inspired palette.
+    pub fn solarized() -> Self {
+        Self {
+            bg: Color::Rgb(253, 246, 227),
+            surface: Color::Rgb(238, 232, 213),
+            border: Color::Rgb(203, 197, 178),
+            border_focus: Color::Rgb(38, 139, 210),
+            text: Color::Rgb(88, 110, 117),
+            muted: Color::Rgb(147, 161, 161),
+            accent: Color::Rgb(38, 139, 210),
+            accent_dim: Color::Rgb(42, 161, 152),
+            ok: Color::Rgb(133, 153, 0),
+            warn: Color::Rgb(181, 137, 0),
+            err: Color::Rgb(220, 50, 47),
+            ice: Color::Rgb(42, 161, 152),
+            user: Color::Rgb(108, 113, 196),
+        }
+    }
+
+    /// ICE theme: deep navy + glacier cyan.
     pub fn ice() -> Self {
         Self {
             bg: Color::Rgb(6, 16, 24),

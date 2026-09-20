@@ -348,17 +348,116 @@ fn draw_session(f: &mut Frame, app: &App, area: Rect) {
             (line.width().max(1) + inner.width.max(1) as usize - 1) / inner.width.max(1) as usize
         })
         .sum();
-    let scroll = app.scroll.min(
-        visual_lines
-            .saturating_sub(inner.height as usize)
-            .min(u16::MAX as usize) as u16,
-    );
+    let max_scroll = visual_lines
+        .saturating_sub(inner.height as usize)
+        .min(u16::MAX as usize) as u16;
+    app.max_scroll.set(max_scroll);
+    // Auto-scroll: stick to the newest output unless the user scrolled up.
+    let scroll = if app.follow {
+        max_scroll
+    } else {
+        app.scroll.min(max_scroll)
+    };
     f.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
             .scroll((scroll, 0)),
         inner,
     );
+}
+
+/// Render a lightweight-markdown body into styled lines: fenced code blocks,
+/// `#` headings, `-`/`*`/numbered bullets, `>` quotes, and inline `**bold**`
+/// and `` `code` ``. Keeps ICE's theme; no external markdown dependency.
+fn push_markdown(out: &mut Vec<Line<'static>>, body: &str, t: &crate::theme::Theme, indent: &str) {
+    let text = Style::default().fg(t.text);
+    let dim = Style::default().fg(t.muted);
+    let code = Style::default().fg(t.accent).bg(t.surface);
+    let mut in_code = false;
+    for raw in body.lines() {
+        let line = raw.trim_end();
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_code = !in_code;
+            continue;
+        }
+        if in_code {
+            out.push(Line::from(Span::styled(format!("{indent}{line}"), code)));
+            continue;
+        }
+        if let Some(h) = trimmed.strip_prefix("### ").or_else(|| trimmed.strip_prefix("## ")).or_else(|| trimmed.strip_prefix("# ")) {
+            out.push(Line::from(Span::styled(
+                format!("{indent}{h}"),
+                Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+            )));
+            continue;
+        }
+        if trimmed.starts_with("> ") {
+            out.push(Line::from(Span::styled(
+                format!("{indent}▏{}", &trimmed[2..]),
+                dim,
+            )));
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+            let mut spans = vec![Span::styled(format!("{indent}• "), Style::default().fg(t.accent))];
+            spans.extend(md_inline(rest, text, t));
+            out.push(Line::from(spans));
+            continue;
+        }
+        let mut spans = vec![Span::styled(indent.to_string(), text)];
+        spans.extend(md_inline(trimmed, text, t));
+        out.push(Line::from(spans));
+    }
+}
+
+/// Split a line into spans, styling `**bold**` and `` `code` `` runs.
+fn md_inline(line: &str, base: Style, t: &crate::theme::Theme) -> Vec<Span<'static>> {
+    let code = Style::default().fg(t.accent).bg(t.surface);
+    let bold = base.add_modifier(Modifier::BOLD);
+    let mut spans = Vec::new();
+    let mut buf = String::new();
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '`' {
+            if !buf.is_empty() {
+                spans.push(Span::styled(std::mem::take(&mut buf), base));
+            }
+            let mut inner = String::new();
+            while let Some(&n) = chars.peek() {
+                chars.next();
+                if n == '`' {
+                    break;
+                }
+                inner.push(n);
+            }
+            spans.push(Span::styled(inner, code));
+        } else if c == '*' && chars.peek() == Some(&'*') {
+            chars.next();
+            if !buf.is_empty() {
+                spans.push(Span::styled(std::mem::take(&mut buf), base));
+            }
+            let mut inner = String::new();
+            while let Some(&n) = chars.peek() {
+                chars.next();
+                if n == '*' && chars.peek() == Some(&'*') {
+                    chars.next();
+                    break;
+                }
+                inner.push(n);
+            }
+            spans.push(Span::styled(inner, bold));
+        } else {
+            buf.push(c);
+        }
+    }
+    if !buf.is_empty() {
+        spans.push(Span::styled(buf, base));
+    }
+    if spans.is_empty() {
+        spans.push(Span::styled(String::new(), base));
+    }
+    spans
 }
 
 /// Render one conversation message in a compact, CLI-style layout:
@@ -449,16 +548,20 @@ fn render_msg(out: &mut Vec<Line<'static>>, msg: &crate::app::Msg, t: &crate::th
             }
         }
         MsgKind::Assistant => {
-            let mut rows = msg.body.lines();
-            if let Some(first) = rows.next() {
-                out.push(Line::from(vec![
-                    Span::styled("⏺ ", Style::default().fg(t.accent).add_modifier(Modifier::BOLD)),
-                    Span::styled(first.to_string(), text),
-                ]));
+            let mut md: Vec<Line<'static>> = Vec::new();
+            push_markdown(&mut md, &msg.body, t, "  ");
+            // Put the assistant bullet on the first rendered line.
+            if let Some(first) = md.first_mut() {
+                let mut spans = vec![Span::styled(
+                    "⏺ ",
+                    Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+                )];
+                spans.extend(std::mem::take(&mut first.spans));
+                *first = Line::from(spans);
+            } else {
+                md.push(Line::from(Span::styled("⏺", Style::default().fg(t.accent))));
             }
-            for row in rows {
-                out.push(Line::from(Span::styled(format!("  {row}"), text)));
-            }
+            out.extend(md);
             out.push(blank());
         }
         MsgKind::System => {
@@ -466,9 +569,7 @@ fn render_msg(out: &mut Vec<Line<'static>>, msg: &crate::app::Msg, t: &crate::th
                 format!("● {}", msg.title),
                 Style::default().fg(t.accent),
             )));
-            for row in msg.body.lines() {
-                out.push(Line::from(Span::styled(format!("  {row}"), text)));
-            }
+            push_markdown(out, &msg.body, t, "  ");
             out.push(blank());
         }
         MsgKind::Agent => {
@@ -695,7 +796,8 @@ fn draw_help(f: &mut Frame, app: &App) {
         .border_style(Style::default().fg(t.border_focus))
         .style(Style::default().bg(t.surface).fg(t.text));
     let text = vec![
-        Line::from("  /theme ice|groknight|frost|ember|mono"),
+        Line::from("  /theme light|ice|groknight|frost|ember|mono|solarized"),
+        Line::from("  web_search <q> · web_fetch <url>   agentic web access"),
         Line::from("  /skills /mcp /todo    skills, MCP tools, live todos"),
         Line::from("  /onboard              provider + key + model wizard"),
         Line::from("  /providers [id]      list or switch xai openai groq …"),
