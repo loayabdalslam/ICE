@@ -7,10 +7,16 @@ use crate::providers::CliAgent;
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 /// Run the CLI agent once with the given prompt, in `root`. Returns its output.
-pub fn complete(agent: &CliAgent, prompt: &str, root: &Path) -> Result<String> {
+pub fn complete(
+    agent: &CliAgent,
+    prompt: &str,
+    root: &Path,
+    cancel: &AtomicBool,
+) -> Result<String> {
     let args: Vec<String> = agent
         .args
         .iter()
@@ -35,20 +41,55 @@ pub fn complete(agent: &CliAgent, prompt: &str, root: &Path) -> Result<String> {
             )
         })?;
 
+    // Drain both pipes on threads so a chatty CLI can't block on a full pipe.
+    let drain = |r: Option<Box<dyn std::io::Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut r) = r {
+                let _ = r.read_to_end(&mut buf);
+            }
+            buf
+        })
+    };
+    let h_out = drain(
+        child
+            .stdout
+            .take()
+            .map(|o| Box::new(o) as Box<dyn std::io::Read + Send>),
+    );
+    let h_err = drain(
+        child
+            .stderr
+            .take()
+            .map(|e| Box::new(e) as Box<dyn std::io::Read + Send>),
+    );
     let start = std::time::Instant::now();
-    loop {
-        if let Some(_status) = child.try_wait()? {
-            break;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if cancel.load(Ordering::Relaxed) {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!(crate::http::Interrupted);
         }
         if start.elapsed() > Duration::from_secs(timeout) {
             let _ = child.kill();
+            let _ = child.wait();
             bail!("`{}` timed out after {timeout}s", agent.bin);
         }
-        std::thread::sleep(Duration::from_millis(120));
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let stdout = String::from_utf8_lossy(&h_out.join().unwrap_or_default())
+        .trim()
+        .to_string();
+    let stderr = String::from_utf8_lossy(&h_err.join().unwrap_or_default())
+        .trim()
+        .to_string();
+    struct Out {
+        status: std::process::ExitStatus,
     }
-    let out = child.wait_with_output()?;
-    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    let out = Out { status };
     if !out.status.success() && stdout.is_empty() {
         let hint = if stderr.to_lowercase().contains("login")
             || stderr.to_lowercase().contains("auth")
@@ -61,7 +102,11 @@ pub fn complete(agent: &CliAgent, prompt: &str, root: &Path) -> Result<String> {
         bail!(
             "`{}` failed: {}{hint}",
             agent.bin,
-            if stderr.is_empty() { "no output" } else { &stderr }
+            if stderr.is_empty() {
+                "no output"
+            } else {
+                &stderr
+            }
         );
     }
     if stdout.is_empty() {

@@ -1,8 +1,13 @@
 [package]
 name = "ice"
-version = "0.4.4"
+version = "0.5.0"
 edition = "2021"
-description = "ICE — Intent · Compile · Execute agent harness"
+description = "ICE — an agentic coding tool that lives in your terminal"
+repository = "https://github.com/loayabdalslam/ICE"
+readme = "README.md"
+keywords = ["cli", "agent", "llm", "coding-assistant", "terminal"]
+categories = ["command-line-utilities", "development-tools"]
+rust-version = "1.87"
 license = "Apache-2.0"
 
 [[bin]]
@@ -10,14 +15,21 @@ name = "ice"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "=1.0.86"
+anyhow = "1"
 crossterm = "=0.27.0"
-ratatui = "=0.26.3"
-regex = "=1.10.5"
-serde_json = "=1.0.117"
-unicode-segmentation = "=1.11.0"
-
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 unicode-width = "=0.1.14"
+ureq = { version = "2.12", default-features = false, features = ["tls", "native-certs", "gzip"] }
+clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }
+clap_complete = "4.5"
+ignore = "0.4"
+globset = "0.4"
+similar = "2.6"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [profile.release]
 lto = true

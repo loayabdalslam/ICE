@@ -1,0 +1,71 @@
+name: ci
+
+# Runs on every push and pull request: formatting, lints, unit tests and the
+# end-to-end tests (which drive the real binary against a mock LLM server)
+# on Linux, macOS and Windows, plus an installer smoke test.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  ICE_NO_AUTO_UPDATE: "1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup update stable && rustup default stable && rustup component add rustfmt clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup update stable && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      - name: unit + end-to-end tests
+        run: cargo test --locked
+      - name: release build
+        run: cargo build --release --locked
+      - name: smoke test
+        shell: bash
+        run: |
+          BIN=target/release/ice
+          [ -f "$BIN.exe" ] && BIN="$BIN.exe"
+          "$BIN" --version
+          "$BIN" --help > /dev/null
+          "$BIN" doctor
+
+  installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup update stable && rustup default stable
+      - name: shellcheck-style syntax check
+        run: bash -n install.sh && bash -n bash/install.sh && bash -n mac/install.sh
+      - name: install from this commit (clone + build)
+        run: |
+          ./install.sh --repo "file://$PWD" --ref HEAD \
+            --dir "$RUNNER_TEMP/ice-src" --bin-dir "$RUNNER_TEMP/bin" --no-path
+          "$RUNNER_TEMP/bin/ice" --version
+          grep -q '"method": "source"' ~/.ice/install.json

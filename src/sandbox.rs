@@ -1,3 +1,7 @@
+//! Path containment (symlink-aware) and a last-resort command deny-list.
+//! The deny-list is defence in depth only; the permission system is the
+//! real gate.
+
 use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
 
@@ -67,20 +71,6 @@ pub fn deny_command(cmd: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn clip(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        let mut end = max;
-        while !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        let mut t = s[..end].to_string();
-        t.push_str("\n… [truncated]");
-        t
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,9 +84,15 @@ mod tests {
         assert!(resolve(&root, "..").is_err());
         assert!(resolve(&root, "../outside-file.txt").is_err());
     }
+    #[cfg(unix)]
     #[test]
-    fn unicode_output_clips_at_character_boundaries() {
-        assert!(clip("🧊ICE", 3).contains("truncated"));
-        assert!(clip("🧊ICE", 4).starts_with("🧊"));
+    fn symlinks_cannot_smuggle_paths_out() {
+        let root = std::env::temp_dir().join(format!("ice-sbx-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let link = root.join("etc-link");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink("/etc", &link).unwrap();
+        assert!(resolve(&root, "etc-link/passwd").is_err());
+        assert!(resolve(&root, "fine.txt").is_ok());
     }
 }

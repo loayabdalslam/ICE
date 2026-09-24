@@ -1,6 +1,8 @@
 use anyhow::{bail, Result};
 
-/// One action inside a compiled burst.
+/// A tool call parsed from a model that has no native tool calling (the
+/// text tool protocol): XML-ish `<function=…>` markup, JSON tool_calls, or
+/// ICE's plain action lines.
 #[derive(Debug, Clone)]
 pub enum Action {
     Read {
@@ -31,9 +33,6 @@ pub enum Action {
     WebFetch {
         url: String,
     },
-    Yield {
-        reason: String,
-    },
     /// Child ICE loop. Name is a short handle; goal is the delegated task.
     Agent {
         name: String,
@@ -46,141 +45,6 @@ pub enum Action {
         tool: String,
         args: String,
     },
-    TodoAdd {
-        text: String,
-    },
-    TodoDone {
-        key: String,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub enum Assert {
-    ExitZero,
-    ExitCode(i32),
-    Contains { path: String, text: String },
-    NotContains { path: String, text: String },
-    FileExists { path: String },
-    FileNotExists { path: String },
-}
-
-#[derive(Debug, Clone)]
-pub struct Burst {
-    pub goal: String,
-    pub actions: Vec<Action>,
-    pub asserts: Vec<Assert>,
-}
-
-impl Burst {
-    pub fn parse(raw: &str) -> Result<Self> {
-        let text = strip_fences(raw);
-
-        // Many models ignore the schema and emit their own tool-call markup
-        // (e.g. <tool_call><function=read><parameter=file_path>…</parameter>).
-        // Translate that into real actions instead of shelling out the tags.
-        if text.contains("<function=") || text.contains("<tool_call") || text.contains("\"tool_calls\"") {
-            let actions = extract_tool_calls(&text);
-            if !actions.is_empty() {
-                let asserts = infer_asserts(&actions);
-                return Ok(Burst {
-                    goal: "(tool calls)".into(),
-                    actions,
-                    asserts,
-                });
-            }
-        }
-
-        let mut goal = String::new();
-        let mut actions = Vec::new();
-        let mut asserts = Vec::new();
-
-        let lines: Vec<&str> = text.lines().collect();
-        let mut i = 0;
-        let mut section = Sec::Top;
-
-        while i < lines.len() {
-            let raw_line = lines[i];
-            let line = raw_line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                i += 1;
-                continue;
-            }
-            let upper = line.to_ascii_uppercase();
-            if upper.starts_with("GOAL:") {
-                goal = line[5..].trim().to_string();
-                section = Sec::Top;
-                i += 1;
-                continue;
-            }
-            if upper == "BURST:" || upper == "BURST" {
-                section = Sec::Burst;
-                i += 1;
-                continue;
-            }
-            if upper == "ASSERT:" || upper == "ASSERT" || upper == "ASSERTS:" {
-                section = Sec::Assert;
-                i += 1;
-                continue;
-            }
-            if upper.starts_with("ON_FAIL:") {
-                i += 1;
-                continue;
-            }
-
-            match section {
-                Sec::Top => {
-                    if goal.is_empty() {
-                        goal = line.to_string();
-                    }
-                    i += 1;
-                }
-                Sec::Burst => {
-                    let (action, consumed) = parse_action(&lines, i)?;
-                    actions.push(action);
-                    i = consumed;
-                }
-                Sec::Assert => {
-                    asserts.push(parse_assert(line)?);
-                    i += 1;
-                }
-            }
-        }
-
-        if actions.is_empty() {
-            let trimmed = text.trim();
-            if trimmed.is_empty() {
-                bail!("empty burst: no actions parsed");
-            } else if trimmed.lines().count() == 1 && looks_like_shell(trimmed) {
-                // A single, clearly shell-shaped line the model forgot to wrap.
-                actions.push(Action::Run {
-                    cmd: trimmed.to_string(),
-                });
-            } else {
-                // Prose or unrecognized markup — never shell it out. Ask to retry.
-                actions.push(Action::Yield {
-                    reason: "no runnable actions in reply — rephrase or add a BURST".into(),
-                });
-            }
-        }
-        if asserts.is_empty() {
-            asserts.push(Assert::ExitZero);
-        }
-        if goal.is_empty() {
-            goal = "(unspecified)".into();
-        }
-        Ok(Burst {
-            goal,
-            actions,
-            asserts,
-        })
-    }
-}
-
-#[derive(Clone, Copy)]
-enum Sec {
-    Top,
-    Burst,
-    Assert,
 }
 
 /// One step of the agentic loop: any leading narration text plus the tool
@@ -218,13 +82,10 @@ pub fn parse_agent_step(raw: &str) -> AgentStep {
         }
         let (verb, _) = split_verb(line);
         if is_action_verb(&verb) {
-            match parse_action(&lines, i) {
-                Ok((a, next)) => {
-                    actions.push(a);
-                    i = next;
-                    continue;
-                }
-                Err(_) => {}
+            if let Ok((a, next)) = parse_action(&lines, i) {
+                actions.push(a);
+                i = next;
+                continue;
             }
         }
         if actions.is_empty() {
@@ -307,16 +168,22 @@ fn extract_tool_calls(text: &str) -> Vec<Action> {
     }
     if actions.is_empty() {
         // JSON tool-call objects: {"name":"read","arguments":{"file_path":"x"}}
-        if let Some(re) = regex::Regex::new(r#"(?s)\{[^{}]*"name"\s*:\s*"([A-Za-z_]+)"[^{}]*\}"#).ok()
-        {
+        if let Ok(re) = regex::Regex::new(r#"(?s)\{[^{}]*"name"\s*:\s*"([A-Za-z_]+)"[^{}]*\}"#) {
             for cap in re.captures_iter(text) {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&cap[0]) {
-                    let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("").to_ascii_lowercase();
+                    let name = v
+                        .get("name")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
                     let args = v.get("arguments").or_else(|| v.get("parameters"));
                     let mut params = Vec::new();
                     if let Some(obj) = args.and_then(|a| a.as_object()) {
                         for (k, val) in obj {
-                            let s = val.as_str().map(String::from).unwrap_or_else(|| val.to_string());
+                            let s = val
+                                .as_str()
+                                .map(String::from)
+                                .unwrap_or_else(|| val.to_string());
                             params.push((k.to_ascii_lowercase(), s));
                         }
                     }
@@ -359,8 +226,11 @@ fn action_from_call(name: &str, params: &[(String, String)]) -> Option<Action> {
         "replace" | "edit" | "str_replace" | "patch" | "edit_file" => Some(Action::Replace {
             path: pick(params, &["file_path", "path", "filename", "file"])?,
             old: pick(params, &["old", "old_str", "old_string", "search"]).unwrap_or_default(),
-            new: pick(params, &["new", "new_str", "new_string", "replace", "content"])
-                .unwrap_or_default(),
+            new: pick(
+                params,
+                &["new", "new_str", "new_string", "replace", "content"],
+            )
+            .unwrap_or_default(),
         }),
         "run" | "bash" | "shell" | "exec" | "execute" | "command" | "run_command" => {
             Some(Action::Run {
@@ -386,17 +256,18 @@ fn action_from_call(name: &str, params: &[(String, String)]) -> Option<Action> {
             name: pick(params, &["name", "skill", "id"])?,
         }),
         "agent" | "spawn" | "subagent" | "delegate" | "task" => Some(Action::Agent {
-            name: slug(&pick(params, &["name", "type", "agent", "role"]).unwrap_or_else(|| "worker".into())),
-            goal: pick(params, &["goal", "task", "prompt", "instructions", "description"])
-                .unwrap_or_default(),
+            name: slug(
+                &pick(params, &["name", "type", "agent", "role"])
+                    .unwrap_or_else(|| "worker".into()),
+            ),
+            goal: pick(
+                params,
+                &["goal", "task", "prompt", "instructions", "description"],
+            )
+            .unwrap_or_default(),
         }),
-        "todo" | "add_todo" | "todo_add" => Some(Action::TodoAdd {
-            text: pick(params, &["text", "task", "todo", "item"])?,
-        }),
-        "yield" | "ask" | "ask_user" | "need_input" | "finish" | "done" => Some(Action::Yield {
-            reason: pick(params, &["reason", "question", "message", "summary"])
-                .unwrap_or_else(|| "decision required".into()),
-        }),
+        "yield" | "ask" | "ask_user" | "need_input" | "finish" | "done" | "todo" | "add_todo"
+        | "todo_add" => None,
         _ => {
             // Unknown function: route it to MCP so ICE can drive any tool a
             // model invents, in any format. Qualified names (server/tool or
@@ -425,15 +296,6 @@ fn params_to_json(params: &[(String, String)]) -> String {
         })
         .collect();
     serde_json::Value::Object(map).to_string()
-}
-
-fn infer_asserts(actions: &[Action]) -> Vec<Assert> {
-    for a in actions {
-        if let Action::Write { path, .. } = a {
-            return vec![Assert::FileExists { path: path.clone() }];
-        }
-    }
-    vec![Assert::ExitZero]
 }
 
 fn strip_fences(s: &str) -> String {
@@ -487,16 +349,6 @@ fn parse_action(lines: &[&str], i: usize) -> Result<(Action, usize)> {
             },
             i + 1,
         )),
-        "yield" | "need_brain" | "need_human" => Ok((
-            Action::Yield {
-                reason: if rest.is_empty() {
-                    "decision required".into()
-                } else {
-                    rest
-                },
-            },
-            i + 1,
-        )),
         "agent" | "spawn" | "subagent" => Ok((parse_agent(&rest), i + 1)),
         "skill" => Ok((
             Action::Skill {
@@ -512,18 +364,6 @@ fn parse_action(lines: &[&str], i: usize) -> Result<(Action, usize)> {
             let args = if args.is_empty() { "{}".into() } else { args };
             Ok((Action::Mcp { tool, args }, i + 1))
         }
-        "todo" | "todo_add" => Ok((
-            Action::TodoAdd {
-                text: need_arg(&rest, "todo")?,
-            },
-            i + 1,
-        )),
-        "todo_done" | "done" => Ok((
-            Action::TodoDone {
-                key: need_arg(&rest, "todo_done")?,
-            },
-            i + 1,
-        )),
         "write" => {
             let path = need_arg(&rest, "write")?;
             let (body, next) = take_block(lines, i + 1, &[">>", "EOF", "```"])?;
@@ -585,10 +425,10 @@ fn split_grep(rest: &str) -> (String, String) {
     if rest.is_empty() {
         return (String::new(), ".".into());
     }
-    if rest.starts_with('"') {
-        if let Some(end) = rest[1..].find('"') {
-            let pat = rest[1..=end].to_string();
-            let path = rest[end + 2..].trim();
+    if let Some(quoted) = rest.strip_prefix('"') {
+        if let Some(end) = quoted.find('"') {
+            let pat = quoted[..end].to_string();
+            let path = quoted[end + 1..].trim();
             return (
                 pat,
                 if path.is_empty() {
@@ -660,10 +500,6 @@ fn take_replace(lines: &[&str], start: usize) -> Result<(String, String, usize)>
     Ok((old, new, i))
 }
 
-pub fn parse_assert_line(line: &str) -> Result<Assert> {
-    parse_assert(line)
-}
-
 fn parse_agent(rest: &str) -> Action {
     let rest = rest.trim();
     if rest.is_empty() {
@@ -709,54 +545,6 @@ fn slug(s: &str) -> String {
     }
 }
 
-fn parse_assert(line: &str) -> Result<Assert> {
-    let line = line.trim().trim_start_matches(['-', '*']).trim();
-    let lower = line.to_ascii_lowercase();
-    if lower == "exit 0" || lower == "exit_zero" || lower == "pytest exit 0" {
-        return Ok(Assert::ExitZero);
-    }
-    if let Some(rest) = lower.strip_prefix("exit ") {
-        if let Ok(code) = rest.trim().parse::<i32>() {
-            return Ok(Assert::ExitCode(code));
-        }
-    }
-    if let Some(rest) = strip_prefix_ci(line, "contains ") {
-        let (path, text) = split_two(rest);
-        return Ok(Assert::Contains { path, text });
-    }
-    if let Some(rest) = strip_prefix_ci(line, "not_contains ") {
-        let (path, text) = split_two(rest);
-        return Ok(Assert::NotContains { path, text });
-    }
-    if let Some(rest) = strip_prefix_ci(line, "file_exists ") {
-        return Ok(Assert::FileExists {
-            path: unquote(rest),
-        });
-    }
-    if let Some(rest) = strip_prefix_ci(line, "file_not_exists ") {
-        return Ok(Assert::FileNotExists {
-            path: unquote(rest),
-        });
-    }
-    Ok(Assert::ExitZero)
-}
-
-fn strip_prefix_ci<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
-    if line.len() >= prefix.len() && line[..prefix.len()].eq_ignore_ascii_case(prefix) {
-        Some(&line[prefix.len()..])
-    } else {
-        None
-    }
-}
-
-fn split_two(s: &str) -> (String, String) {
-    let s = s.trim();
-    match s.split_once(char::is_whitespace) {
-        Some((a, b)) => (unquote(a), unquote(b)),
-        None => (unquote(s), String::new()),
-    }
-}
-
 fn looks_like_shell(line: &str) -> bool {
     let t = line.trim();
     t.starts_with("ls")
@@ -774,66 +562,64 @@ fn looks_like_shell(line: &str) -> bool {
 mod tests {
     use super::*;
 
+    fn first(raw: &str) -> Action {
+        parse_agent_step(raw)
+            .actions
+            .into_iter()
+            .next()
+            .expect("an action")
+    }
+
     #[test]
     fn parses_qwen_xml_tool_call_as_read() {
-        let raw = "<tool_call><function=read><parameter=file_path>.ice/goal.md</parameter></function></tool_call>";
-        let b = Burst::parse(raw).unwrap();
-        assert_eq!(b.actions.len(), 1);
-        match &b.actions[0] {
-            Action::Read { path } => assert_eq!(path, ".ice/goal.md"),
+        let raw = "<tool_call><function=read><parameter=file_path>src/main.rs</parameter></function></tool_call>";
+        match first(raw) {
+            Action::Read { path } => assert_eq!(path, "src/main.rs"),
             other => panic!("expected Read, got {other:?}"),
         }
     }
 
     #[test]
-    fn xml_write_infers_file_exists_assert() {
+    fn xml_write_carries_contents() {
         let raw = "<function=write><parameter=path>index.html</parameter><parameter=content><h1>hi</h1></parameter></function>";
-        let b = Burst::parse(raw).unwrap();
-        match &b.actions[0] {
+        match first(raw) {
             Action::Write { path, contents } => {
                 assert_eq!(path, "index.html");
                 assert!(contents.contains("hi"));
             }
             other => panic!("expected Write, got {other:?}"),
         }
-        assert!(matches!(b.asserts[0], Assert::FileExists { .. }));
     }
 
     #[test]
-    fn prose_reply_yields_instead_of_shelling_out() {
-        let raw = "I will read the goal file and then decide what to do next.";
-        let b = Burst::parse(raw).unwrap();
-        assert!(matches!(b.actions[0], Action::Yield { .. }));
+    fn prose_is_a_final_answer() {
+        let step = parse_agent_step("I will read the goal file and then decide what to do next.");
+        assert!(step.actions.is_empty());
+        assert!(step.text.starts_with("I will read"));
     }
 
     #[test]
-    fn valid_schema_still_parses() {
-        let raw = "GOAL: x\nBURST:\n  write a.txt\n  <<\nhi\n  >>\nASSERT:\n  file_exists a.txt\n";
-        let b = Burst::parse(raw).unwrap();
-        assert!(matches!(b.actions[0], Action::Write { .. }));
+    fn plain_action_lines_with_blocks() {
+        let step = parse_agent_step("Writing it.\nwrite a.txt\n<<\nhi\n>>\nrun cargo test");
+        assert_eq!(step.text, "Writing it.");
+        assert!(matches!(step.actions[0], Action::Write { .. }));
+        assert!(matches!(step.actions[1], Action::Run { .. }));
     }
-}
-
-#[cfg(test)]
-mod call_routing_tests {
-    use super::*;
 
     #[test]
     fn mcp_and_skill_and_agent_calls_route() {
         let raw = "<function=mcp><parameter=tool>fs/read</parameter><parameter=args>{\"p\":1}</parameter></function>";
-        assert!(matches!(Burst::parse(raw).unwrap().actions[0], Action::Mcp { .. }));
-
+        assert!(matches!(first(raw), Action::Mcp { .. }));
         let raw = "<function=use_skill><parameter=name>pdf</parameter></function>";
-        assert!(matches!(Burst::parse(raw).unwrap().actions[0], Action::Skill { .. }));
-
+        assert!(matches!(first(raw), Action::Skill { .. }));
         let raw = "<function=agent><parameter=type>explore</parameter><parameter=goal>map src</parameter></function>";
-        assert!(matches!(Burst::parse(raw).unwrap().actions[0], Action::Agent { .. }));
+        assert!(matches!(first(raw), Action::Agent { .. }));
     }
 
     #[test]
     fn unknown_function_becomes_mcp_call() {
         let raw = "<function=weather__lookup><parameter=city>Cairo</parameter></function>";
-        match &Burst::parse(raw).unwrap().actions[0] {
+        match first(raw) {
             Action::Mcp { tool, args } => {
                 assert_eq!(tool, "weather/lookup");
                 assert!(args.contains("Cairo"));

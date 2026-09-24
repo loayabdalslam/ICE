@@ -1,268 +1,187 @@
-//! Subagents — Claude-Code-style delegated workers.
+//! Sub-agent definitions for the Task tool: the built-in types plus custom
+//! agents defined as markdown files with frontmatter, in
+//! `.ice/agents/`, `.claude/agents/` (compatible) and `~/.ice/agents/`:
 //!
-//! Each subagent runs its own tight ICE loop in an ISOLATED context: it only
-//! ever sees the goal delegated to it, never the parent transcript, so parallel
-//! or exploratory work does not inflate the parent's token budget. What comes
-//! back to the parent (and the board) is a COMPACT report — a one-line result,
-//! the files it touched, and step/timing counts — while the full transcript is
-//! written to `.ice/agents/<name>.md` for inspection.
+//! ```markdown
+//! ---
+//! name: reviewer
+//! description: Reviews diffs for bugs. Use after writing code.
+//! tools: Read, Grep, Glob
+//! model: inherit
+//! ---
+//! You are a meticulous code reviewer…
+//! ```
 
-use crate::delta;
-use crate::exec::{self, StepResult};
-use crate::goal::DurableGoal;
-use crate::ir::{Action, Burst};
-use crate::llm::{self, Llm};
-use crate::verify;
-use anyhow::Result;
-use std::fs;
-use std::path::Path;
-use std::time::Instant;
+use std::path::{Path, PathBuf};
 
-/// A specialization a subagent can take. Mirrors Claude Code's agent types:
-/// read-only explorers/reviewers that cannot touch the workspace, planners,
-/// and full builders.
-#[derive(Clone, Copy, Debug)]
-pub struct Archetype {
-    pub id: &'static str,
-    pub blurb: &'static str,
-    pub read_only: bool,
-    pub preamble: &'static str,
+#[derive(Clone, Debug)]
+pub struct AgentDef {
+    pub name: String,
+    pub description: String,
+    /// None = all tools (except Task).
+    pub tools: Option<Vec<String>>,
+    pub model: Option<String>,
+    pub prompt: String,
+    pub source: String,
 }
 
-pub const ARCHETYPES: &[Archetype] = &[
-    Archetype {
-        id: "explore",
-        blurb: "read-only search across the workspace",
-        read_only: true,
-        preamble: "You are a READ-ONLY explorer. Use read/list/grep only to investigate and report what you find. Never write, replace, or run mutating commands.",
-    },
-    Archetype {
-        id: "plan",
-        blurb: "read-only; produces a step-by-step plan",
-        read_only: true,
-        preamble: "You are a PLANNER. Investigate read-only, then report a concise, ordered plan. Do not modify the workspace.",
-    },
-    Archetype {
-        id: "review",
-        blurb: "read-only code review / critique",
-        read_only: true,
-        preamble: "You are a REVIEWER. Read the relevant files and report concrete issues and fixes. Do not modify anything.",
-    },
-    Archetype {
-        id: "build",
-        blurb: "implements changes and writes files",
-        read_only: false,
-        preamble: "You are a BUILDER. Make the smallest set of edits that satisfies the goal, and assert the result.",
-    },
-    Archetype {
-        id: "general",
-        blurb: "general-purpose worker",
-        read_only: false,
-        preamble: "You are a general-purpose worker. Finish the delegated goal in as few bursts as possible.",
-    },
+const READ_TOOLS: &[&str] = &[
+    "Read",
+    "Glob",
+    "Grep",
+    "LS",
+    "WebFetch",
+    "WebSearch",
+    "BashOutput",
+    "Skill",
 ];
 
-/// Resolve a handle to an archetype by keyword (build/plan/review/explore),
-/// defaulting to general-purpose.
-pub fn resolve(name: &str) -> &'static Archetype {
-    let n = name.to_ascii_lowercase();
-    for a in ARCHETYPES {
-        if n == a.id || n.contains(a.id) {
-            return a;
-        }
-    }
-    // Common synonyms.
-    if n.contains("scout") || n.contains("search") || n.contains("find") || n.contains("map") {
-        return &ARCHETYPES[0];
-    }
-    if n.contains("critic") || n.contains("audit") {
-        return &ARCHETYPES[2];
-    }
-    if n.contains("writ") || n.contains("impl") || n.contains("code") || n.contains("fix") {
-        return &ARCHETYPES[3];
-    }
-    &ARCHETYPES[4]
-}
-
-pub fn catalog() -> String {
-    let mut s = String::from("subagent types:\n");
-    for a in ARCHETYPES {
-        s.push_str(&format!(
-            "  • {:<8} {}{}\n",
-            a.id,
-            a.blurb,
-            if a.read_only { " · read-only" } else { "" }
-        ));
-    }
-    s.push_str("\nspawn:  /agent <type>: <goal>   or in a burst:  agent <type>: <goal>\n");
-    s
-}
-
-/// Run a child ICE loop with a tight turn budget, an archetype role, and no
-/// further spawning. Returns a compact report as the step output.
-pub fn run_subagent(root: &Path, name: &str, goal: &str, demo: bool, max_turns: u32) -> StepResult {
-    let t0 = Instant::now();
-    let _ = DurableGoal::ensure_dir(root);
-    let arch = resolve(name);
-    match run_inner(root, name, arch, goal, demo, max_turns.max(1).min(3)) {
-        Ok(report) => {
-            let path = root.join(".ice/agents").join(format!("{name}.md"));
-            let _ = fs::write(
-                &path,
-                format!(
-                    "# subagent {name} ({})\n\n## goal\n{goal}\n\n## report\n{}\n\n## transcript\n{}\n",
-                    arch.id, report.summary, report.transcript
-                ),
-            );
-            StepResult {
-                title: format!("agent {}·{name}", arch.id),
-                ok: report.ok,
-                exit: if report.ok { 0 } else { 1 },
-                output: report.board(),
-                ms: t0.elapsed().as_millis(),
-            }
-        }
-        Err(e) => StepResult {
-            title: format!("agent {}·{name}", arch.id),
-            ok: false,
-            exit: 1,
-            output: format!("failed: {e}"),
-            ms: t0.elapsed().as_millis(),
+pub fn builtins() -> Vec<AgentDef> {
+    vec![
+        AgentDef {
+            name: "general-purpose".into(),
+            description: "General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks.".into(),
+            tools: None,
+            model: None,
+            prompt: "You are a general-purpose agent. Complete the task fully — don't gold-plate, but don't leave it half-done.".into(),
+            source: "built-in".into(),
         },
-    }
+        AgentDef {
+            name: "Explore".into(),
+            description: "Fast read-only agent specialized for exploring codebases: find files by pattern, search code for keywords, answer questions about the codebase. Say how thorough to be: quick, medium or very thorough.".into(),
+            tools: Some(READ_TOOLS.iter().map(|s| s.to_string()).collect()),
+            model: None,
+            prompt: "You are a file search specialist. You are READ-ONLY: you cannot create, modify or delete files. Use Glob for broad file patterns, Grep for content, Read for specific files. Return absolute file paths and concise findings.".into(),
+            source: "built-in".into(),
+        },
+        AgentDef {
+            name: "Plan".into(),
+            description: "Read-only software architect: explores the codebase and returns a step-by-step implementation plan, the critical files, and trade-offs.".into(),
+            tools: Some(READ_TOOLS.iter().map(|s| s.to_string()).collect()),
+            model: None,
+            prompt: "You are a software architect. You are READ-ONLY. Explore the relevant code, then return a concrete implementation plan: ordered steps, the critical files (absolute paths) and the trade-offs you considered.".into(),
+            source: "built-in".into(),
+        },
+    ]
 }
 
-struct Report {
-    ok: bool,
-    summary: String,
-    files: Vec<String>,
-    steps: usize,
-    transcript: String,
-}
-
-impl Report {
-    /// The compact, board-facing view the parent sees — never the transcript.
-    fn board(&self) -> String {
-        let mut s = String::new();
-        s.push_str(&format!("report · {}", one_line(&self.summary)));
-        if !self.files.is_empty() {
-            s.push_str(&format!("\nfiles: {}", self.files.join(", ")));
-        }
-        s.push_str(&format!("\n{} step(s)", self.steps));
-        s
-    }
-}
-
-fn run_inner(
-    root: &Path,
-    name: &str,
-    arch: &Archetype,
-    goal: &str,
-    demo: bool,
-    max_turns: u32,
-) -> Result<Report> {
-    let mut last_delta: Option<String> = None;
-    let mut transcript = String::new();
-    let mut files: Vec<String> = Vec::new();
-    let mut total_steps = 0usize;
-    let mut last_summary = String::new();
-
-    for turn in 1..=max_turns {
-        let raw = if demo {
-            demo_child(name, goal, turn)
-        } else {
-            let llm = Llm::from_env().ok_or_else(|| anyhow::anyhow!("no API key"))?;
-            // Isolated context: only the role + delegated goal + own last delta.
-            let user = format!(
-                "{}\n\nYou are subagent `{name}`.\nDelegated goal:\n{goal}\n\n{}\nEmit ONE BURST. Do not spawn further agents.",
-                arch.preamble,
-                last_delta.as_deref().unwrap_or("No prior delta."),
-            );
-            llm.complete(llm::SYSTEM_PROMPT, &user)?.content
+fn parse(text: &str, fallback: &str, source: &str) -> Option<AgentDef> {
+    let rest = text.strip_prefix("---")?;
+    let end = rest.find("\n---")?;
+    let fm = &rest[..end];
+    let body = rest[end + 4..].trim().to_string();
+    let mut name = fallback.to_string();
+    let mut description = String::new();
+    let mut tools = None;
+    let mut model = None;
+    for line in fm.lines() {
+        let Some((k, v)) = line.split_once(':') else {
+            continue;
         };
-        transcript.push_str(&format!("-- {name} burst {turn} --\n{raw}\n"));
-        let burst = Burst::parse(&raw)?;
-        let mut steps = Vec::new();
-        for action in &burst.actions {
-            // No nested spawning.
-            if matches!(action, Action::Agent { .. }) {
-                continue;
-            }
-            // Read-only archetypes cannot mutate the workspace.
-            if arch.read_only
-                && matches!(
-                    action,
-                    Action::Write { .. } | Action::Replace { .. } | Action::Run { .. }
+        let v = v.trim().trim_matches('"').trim_matches('\'');
+        match k.trim() {
+            "name" if !v.is_empty() => name = v.to_string(),
+            "description" => description = v.to_string(),
+            "tools" if !v.is_empty() && v != "*" => {
+                tools = Some(
+                    v.split(',')
+                        .map(|t| t.trim().to_string())
+                        .filter(|t| !t.is_empty())
+                        .collect(),
                 )
-            {
-                steps.push(StepResult {
-                    title: "blocked (read-only agent)".into(),
-                    ok: true,
-                    exit: 0,
-                    output: "skipped a mutating action".into(),
-                    ms: 0,
-                });
-                continue;
             }
-            if let Action::Write { path, .. } = action {
-                files.push(path.clone());
-            }
-            steps.push(exec::run_action(root, action));
+            "model" if !v.is_empty() && v != "inherit" => model = Some(v.to_string()),
+            _ => {}
         }
-        total_steps += steps.len();
-        let asserts = verify::check(root, &burst.asserts, &steps);
-        let packed = delta::pack(&steps, &asserts);
-        transcript.push_str(&packed.summary);
-        transcript.push('\n');
-        last_summary = packed.summary.clone();
-        if packed.ok {
-            return Ok(Report {
-                ok: true,
-                summary: packed.summary,
-                files,
-                steps: total_steps,
-                transcript,
-            });
-        }
-        // Stop retrying an identical failure.
-        if last_delta.as_deref() == Some(packed.summary.as_str()) {
-            break;
-        }
-        last_delta = Some(packed.summary);
     }
-    Ok(Report {
-        ok: false,
-        summary: if last_summary.is_empty() {
-            "no progress".into()
-        } else {
-            last_summary
-        },
-        files,
-        steps: total_steps,
-        transcript,
+    Some(AgentDef {
+        name,
+        description,
+        tools,
+        model,
+        prompt: body,
+        source: source.into(),
     })
 }
 
-fn one_line(s: &str) -> String {
-    let line = s.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
-    if line.chars().count() > 120 {
-        format!("{}…", line.chars().take(119).collect::<String>())
-    } else {
-        line.to_string()
-    }
+pub fn dirs(root: &Path) -> Vec<(PathBuf, &'static str)> {
+    vec![
+        (crate::settings::user_dir().join("agents"), "user"),
+        (root.join(".claude/agents"), "project"),
+        (root.join(".ice/agents"), "project"),
+    ]
 }
 
-fn demo_child(name: &str, goal: &str, turn: u32) -> String {
-    if name.contains("write") || name.contains("build") {
-        return format!(
-            "GOAL: {goal}\nBURST:\n  write .ice/DONE\n  <<\nclosed by {name}\n  >>\nASSERT:\n  file_exists .ice/DONE\n"
-        );
+/// Built-ins, then custom agents (later definitions override by name).
+pub fn all(root: &Path) -> Vec<AgentDef> {
+    let mut out = builtins();
+    for (dir, source) in dirs(root) {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut files: Vec<_> = rd
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("md"))
+            .collect();
+        files.sort();
+        for p in files {
+            let Ok(t) = std::fs::read_to_string(&p) else {
+                continue;
+            };
+            let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("agent");
+            if let Some(a) = parse(&t, stem, source) {
+                out.retain(|x| !x.name.eq_ignore_ascii_case(&a.name));
+                out.push(a);
+            }
+        }
     }
-    if turn == 1 {
-        format!("GOAL: {goal}\nBURST:\n  list .\nASSERT:\n  exit 0\n")
-    } else {
-        format!("GOAL: {goal}\nBURST:\n  run echo subagent {name} finished\nASSERT:\n  exit 0\n")
+    out
+}
+
+pub fn find(root: &Path, name: &str) -> Option<AgentDef> {
+    let all = all(root);
+    let n = name.trim();
+    all.iter()
+        .find(|a| a.name.eq_ignore_ascii_case(n))
+        .or_else(|| {
+            let l = n.to_ascii_lowercase();
+            all.iter().find(|a| {
+                (l.contains("explor") || l.contains("search") || l.contains("find"))
+                    && a.name == "Explore"
+                    || l.contains("plan") && a.name == "Plan"
+            })
+        })
+        .cloned()
+}
+
+/// Task tool description suffix listing the available agents.
+pub fn listing(root: &Path) -> String {
+    all(root)
+        .iter()
+        .map(|a| {
+            let tools = a
+                .tools
+                .as_ref()
+                .map(|t| t.join(", "))
+                .unwrap_or_else(|| "*".into());
+            format!("- {}: {} (Tools: {tools})", a.name, a.description)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn catalog(root: &Path) -> String {
+    let mut s =
+        String::from("Agents (use via the Task tool, or ask: \"use the <name> agent to …\"):\n");
+    for a in all(root) {
+        s.push_str(&format!(
+            "  • {} [{}] — {}\n",
+            a.name, a.source, a.description
+        ));
     }
+    s.push_str("\nCreate your own in .ice/agents/<name>.md with `name`, `description`, `tools` frontmatter.");
+    s
 }
 
 #[cfg(test)]
@@ -270,13 +189,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn archetypes_resolve_by_keyword() {
-        assert_eq!(resolve("explore").id, "explore");
-        assert_eq!(resolve("scout").id, "explore");
-        assert_eq!(resolve("reviewer").id, "review");
-        assert_eq!(resolve("builder").id, "build");
-        assert_eq!(resolve("whatever").id, "general");
-        assert!(resolve("explore").read_only);
-        assert!(!resolve("build").read_only);
+    fn custom_agent_frontmatter() {
+        let a = parse("---\nname: reviewer\ndescription: Reviews code\ntools: Read, Grep\nmodel: inherit\n---\nBe strict.", "x", "project").unwrap();
+        assert_eq!(a.name, "reviewer");
+        assert_eq!(a.tools.unwrap(), vec!["Read", "Grep"]);
+        assert!(a.model.is_none());
+        assert_eq!(a.prompt, "Be strict.");
+    }
+
+    #[test]
+    fn fuzzy_builtin_lookup() {
+        let root = std::env::temp_dir();
+        assert_eq!(find(&root, "explore").unwrap().name, "Explore");
+        assert_eq!(
+            find(&root, "general-purpose").unwrap().name,
+            "general-purpose"
+        );
+        assert!(find(&root, "nonexistent-agent").is_none());
     }
 }
