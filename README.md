@@ -3,326 +3,280 @@
 </p>
 
 <p align="center">
-  <strong>Your next idea deserves a clear path to execution.</strong><br>
-  A terminal agent workspace with a curious pixel companion, visible execution steps, and your choice of model provider.
+  <strong>An agentic coding tool that lives in your terminal.</strong><br>
+  ICE reads your codebase, edits files, runs commands and works through multi-step tasks —<br>
+  with any model provider, and your permission at every step that matters.
 </p>
 
 <p align="center">
-  <a href="#install"><img src="https://img.shields.io/badge/ICE-0.4.4-50d2ff?style=flat-square&labelColor=061018" alt="ICE 0.4.4"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/ICE-0.5.0-50d2ff?style=flat-square&labelColor=061018" alt="ICE 0.5.0"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-a0ecff?style=flat-square&labelColor=061018" alt="Apache 2.0 license"></a>
-  <a href="#platforms"><img src="https://img.shields.io/badge/distribution-native_binaries-40dcaa?style=flat-square&labelColor=061018" alt="Native binary distribution"></a>
-  <a href="#how-installation-works"><img src="https://img.shields.io/badge/downloads-SHA--256_verified-a0ecff?style=flat-square&labelColor=061018" alt="SHA-256 verified downloads"></a>
+  <a href=".github/workflows/ci.yml"><img src="https://img.shields.io/badge/CI-linux_·_macOS_·_windows-40dcaa?style=flat-square&labelColor=061018" alt="CI on Linux, macOS and Windows"></a>
+  <img src="https://img.shields.io/badge/built_with-Rust-a0ecff?style=flat-square&labelColor=061018" alt="Built with Rust">
 </p>
 
 <p align="center">
   <a href="#install">Install</a> ·
-  <a href="#first-session">First session</a> ·
-  <a href="#what-you-can-do">Features</a> ·
-  <a href="#providers">Providers</a> ·
-  <a href="#command-reference">Commands</a> ·
-  <a href="#comparison-on-the-same-no-llm-metrics">Comparison</a> ·
-  <a href="docs/WEBSITE.md">Website snippets</a>
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#sign-in">Sign in</a> ·
+  <a href="#what-ice-can-do">Features</a> ·
+  <a href="#commands">Commands</a> ·
+  <a href="#permissions">Permissions</a> ·
+  <a href="#configuration">Configuration</a> ·
+  <a href="docs/architecture.md">Architecture</a>
 </p>
 
-<p align="center"><img src="assets/ice-preview.gif" width="960" alt="The actual ICE welcome screen with FLOE, an animated pixel ice cube with blinking eyes."></p>
-<p align="center"><sub>FLOE Edition. Actual terminal-render captures. <a href="assets/welcome.png">Static preview</a> · <a href="assets/session.png">Conversation view</a></sub></p>
+<p align="center"><img src="assets/ice-preview.gif" width="960" alt="The ICE home screen with FLOE, the pixel ice cube."></p>
 
 ## Install
 
-One command. A prebuilt binary. No Rust toolchain, project compilation, or administrator access required.
+The installer **clones this repository and builds ICE from source** with `cargo` (it installs a minimal Rust toolchain through rustup if you don't have one). Re-running it, or `ice update`, pulls the latest commits and rebuilds.
 
-### <img src="assets/icons/windows.svg" width="20" alt="Windows"> Windows · PowerShell
+**Linux · macOS**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/loayabdalslam/ICE/main/install.sh | bash
+```
+
+**Windows (PowerShell)**
 
 ```powershell
 irm https://raw.githubusercontent.com/loayabdalslam/ICE/main/install.ps1 | iex
 ```
 
-### <img src="assets/icons/ubuntu.svg" width="20" alt="Linux"> Linux · Bash
+Requirements: `git`, a C linker (`build-essential` on Linux, Xcode command-line tools on macOS, the MSVC build tools on Windows). On Windows the installer falls back to the prebuilt, SHA-256-verified release binary if a source build isn't possible. Git for Windows provides the `bash.exe` ICE uses for shell commands.
+
+<details>
+<summary><strong>Installer options</strong></summary>
+
+| Option (`install.sh` / `install.ps1`) | Meaning |
+| --- | --- |
+| `--ref REF` / `-Ref` | Branch, tag or commit to build (default `main`) |
+| `--dir DIR` / `-SourceDir` | Where the source checkout lives (default `~/.local/share/ice/src`, `%LOCALAPPDATA%\ICE\src`) |
+| `--bin-dir DIR` / `-InstallDir` | Where `ice` is installed (default `~/.local/bin`, `%LOCALAPPDATA%\Programs\ICE`) |
+| `--binary` / `-Binary` | Install a prebuilt release binary (checksum-verified) instead of building |
+| `--no-rustup` / `-NoRustup` | Don't install Rust automatically |
+| `--no-path` / `-NoPath` | Don't edit your shell profile / user PATH |
+| `-Uninstall` | Windows: remove ICE and the PATH entry |
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/loayabdalslam/ICE/main/bash/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/loayabdalslam/ICE/main/install.sh | bash -s -- --ref v0.5.0 --bin-dir ~/bin
 ```
 
-### <img src="assets/icons/apple.svg" width="20" alt="Apple"> macOS · Apple Silicon & Intel
+Or build it yourself:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/loayabdalslam/ICE/main/mac/install.sh | bash
+git clone https://github.com/loayabdalslam/ICE && cd ICE
+cargo install --path .
 ```
 
-Then start in your project folder:
+</details>
+
+## Quick start
 
 ```bash
+cd your-project
 ice
 ```
 
-The same commands upgrade to the release named in [`LATEST`](LATEST). Open a new terminal after installation if `ice` is not yet on your PATH. For an offline first look, run `ice --demo`.
-
-> This is the **binary distribution repository**. It contains executables, installers, documentation and artwork. Application source code, credentials and build caches are not included.
-
-## What you can do
-
-| | Feature | What it does |
-| --- | --- | --- |
-| <img src="assets/icons/terminal.svg" width="24" alt="Terminal"> | **A workspace that feels alive** | Meet FLOE: an isometric pixel ice cube with blinking eyes, gentle movement, and a glacier color palette. |
-| <img src="assets/icons/diagram-3.svg" width="24" alt="Workflow"> | **Visible execution** | Follow intent, compiled action bursts, step results, assertions, and execution summaries in the terminal. |
-| <img src="assets/icons/cpu.svg" width="24" alt="Models"> | **Choose your provider** | Configure hosted providers, local Ollama, or an OpenAI-compatible endpoint through onboarding. |
-| <img src="assets/icons/check-circle.svg" width="24" alt="Tasks"> | **Keep work in view** | Use durable goals, todo items, skills, MCP tools and delegated agent tasks from slash commands. |
-| <img src="assets/icons/download.svg" width="24" alt="Download"> | **A small installation** | Download the binary for your machine. No source checkout or package-manager runtime is needed to install. |
-| <img src="assets/icons/shield-check.svg" width="24" alt="Integrity"> | **Verified downloads** | The installer checks the release checksum before executing a version check or replacing your installation. |
-
-## Platforms
-
-| Platform | Download | Verification |
-| --- | --- | --- |
-| Windows x64 | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.4.4/windows-x86_64/ice.exe) | Built with the release profile; executed and installed on Windows |
-| Linux x64 | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.4.4/linux-x86_64/ice) | Built & published by CI on each tagged release |
-| Linux ARM64 | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.4.4/linux-aarch64/ice) | Built & published by CI on each tagged release |
-| macOS Intel | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.4.4/macos-x86_64/ice) | Built & published by CI on each tagged release |
-| macOS Apple Silicon | [Download](https://raw.githubusercontent.com/loayabdalslam/ICE/main/releases/0.4.4/macos-aarch64/ice) | Built & published by CI on each tagged release |
-
-**Requirements:** a Unicode terminal; `curl` for API calls; Bash for shell actions. On Windows, install [Git for Windows](https://gitforwindows.org/) and make `bash.exe` available on PATH. Linux builds use musl to avoid a system glibc dependency. macOS builds require macOS 11 or newer. Windows ARM64 uses the x64 build through Windows emulation.
-
-**Display:** 120 columns × 40 rows is recommended; the minimum is 36 × 14. Narrow layouts prioritize the composer and conversation. A Nerd Font is not required.
-
-**Verification:** the Windows binary is built with the release profile and was executed and installed locally. Linux and macOS binaries are built and published for each target by GitHub Actions (`.github/workflows/release.yml`) on every tagged release, with a `SHA256SUMS.txt` the installer checks before running or replacing anything. macOS binaries are not notarized, and Windows binaries are not Authenticode-signed.
-
-## First session
-
-1. Open a terminal in the project you want ICE to work with.
-2. Run `ice`, choose a provider, enter its API key, and select a model.
-3. Describe an outcome in the composer, then press Enter.
+On first run ICE asks whether you trust the folder, then walks you through connecting a model provider. Then just describe what you want:
 
 ```text
-Explain the structure of this project and identify its entry points.
+> explain the structure of this project and find the entry points
+> add input validation to the signup form and write tests for it
+> the build is failing — fix it
 ```
 
-Use Escape to skip onboarding and explore the interface, or `/onboard` to reopen it. Keys pasted into onboarding stay in the running process; they are not saved by the wizard. To reuse a key across sessions, configure the provider's environment variable yourself.
+Useful first steps: `/init` writes an `ICE.md` that teaches ICE your build, test and lint commands; `/help` lists everything.
 
-```bash
-# Offline demo in a scratch directory
-mkdir ice-playground
-cd ice-playground
-ice --demo
-```
+## Sign in
 
-ICE creates `.ice/` workspace state in the selected directory. Demo execution runs predefined actions and can write demonstration files. Live mode can run shell commands and edit files in the working environment; it is not a virtual machine or OS sandbox.
+Run `/onboard` (or `/login`) in ICE, or `ice login` in your shell. Pick a provider, then choose how to authenticate:
 
-## Providers
+| Method | How it works |
+| --- | --- |
+| **Sign in with browser (OAuth 2.0 + PKCE)** | ICE opens your browser, listens on a local loopback callback, and exchanges the code with an S256 PKCE verifier (RFC 7636) and a CSRF `state` check. Tokens are stored in `~/.ice/credentials.json` (mode 0600) and refreshed automatically. |
+| **Paste an API key** | Stored the same way, or read from the usual environment variable. |
+| **CLI backend** | Delegate to an agent CLI you're already logged into (Codex / ChatGPT, Claude Code, opencode, Gemini CLI, Qwen Code). |
 
-| Provider | Environment variable | Provider ID |
+Browser sign-in is offered for every provider:
+
+- **OpenRouter** works out of the box. Its public PKCE flow needs no app registration and returns an API key.
+- **Google Gemini** uses Google OAuth. Create an OAuth client (type *Desktop app*) in Google Cloud Console, then run `ice config set oauth '{"gemini":{"clientId":"…","clientSecret":"…"}}'`.
+- **Any other provider, or your own OpenAI-compatible gateway**, can sign in through an OAuth/OIDC app you register. Set `authorizeUrl`, `tokenUrl`, `clientId` (and optionally `clientSecret`, `scopes`) under `oauth.<provider>`, or through `ICE_OAUTH_<PROVIDER>_*` environment variables.
+
+ICE never borrows another product's OAuth client ID. Providers such as OpenAI, Anthropic, Groq, xAI and Mistral don't publish third-party OAuth for their APIs, so for those use an API key, a CLI backend, or your organisation's gateway.
+
+| Provider | Key variable | ID |
 | --- | --- | --- |
-| OpenAI | `OPENAI_API_KEY` | `openai` |
 | Anthropic | `ANTHROPIC_API_KEY` | `anthropic` |
-| Google Gemini | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini` |
+| OpenAI | `OPENAI_API_KEY` | `openai` |
+| Google Gemini | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | `gemini` |
 | xAI | `XAI_API_KEY` | `xai` |
 | Groq | `GROQ_API_KEY` | `groq` |
 | OpenRouter | `OPENROUTER_API_KEY` | `openrouter` |
-| Together AI | `TOGETHER_API_KEY` | `together` |
-| Fireworks AI | `FIREWORKS_API_KEY` | `fireworks` |
 | DeepSeek | `DEEPSEEK_API_KEY` | `deepseek` |
 | Mistral | `MISTRAL_API_KEY` | `mistral` |
-| Ollama | `OLLAMA_API_KEY` / `ICE_API_KEY` | `ollama` |
-| Custom compatible endpoint | `ICE_API_KEY` | `custom` |
+| Together AI | `TOGETHER_API_KEY` | `together` |
+| Fireworks AI | `FIREWORKS_API_KEY` | `fireworks` |
+| Ollama (local) | none needed | `ollama` |
+| Any OpenAI-compatible endpoint | `ICE_API_KEY` + `ICE_BASE_URL` | `custom` |
 
-These are adapters present in this release, not a guarantee that every service or model was tested. Model availability depends on your provider account. `/models` discovers models; `/model NAME` selects one. If your local server accepts unauthenticated requests, this release may still need a non-empty placeholder key for live-mode detection.
+The Anthropic API uses native Messages streaming with prompt caching and extended thinking. Every other provider uses the OpenAI-compatible Chat Completions API with native tool calling. Models without tool calling automatically switch to ICE's text tool protocol.
 
-## Command reference
+## What ICE can do
 
-### Terminal commands
+| | Capability | Details |
+| --- | --- | --- |
+| 🧊 | **Agentic loop** | Streams the model's answer and runs the tools it calls (independent reads in parallel), repeating until the task is done. Esc interrupts at any moment. |
+| 🛠 | **Tools** | `Read`, `Write`, `Edit`, `MultiEdit`, `Glob`, `Grep`, `LS`, `Bash` (persistent working directory, timeouts, background shells via `BashOutput`/`KillShell`), `WebFetch`, `WebSearch`, `TodoWrite`, `Task`, `Skill`, and every MCP tool. Names, parameters and error messages match Claude Code's, so models use them fluently. |
+| 🔐 | **Permissions** | Reads inside the project are free; edits, commands and fetches ask first, with a diff or command preview. Modes: default / accept edits / plan / bypass. Allow/deny rules such as `Bash(npm test:*)`. |
+| ✍️ | **Safe edits** | A file must be read before it is edited, edits fail if the file changed on disk since, the old text must match uniquely, and CRLF line endings are preserved. Every change is shown as a diff. |
+| 🧠 | **Memory** | `ICE.md` (also `CLAUDE.md` and `AGENTS.md`) from the project, its parents and `~/.ice/`, with `@path` imports. Type `# note` to save a memory. |
+| 🤖 | **Sub-agents** | `Task` runs isolated agents (general-purpose, Explore, Plan) or your own from `.ice/agents/*.md`. Several can run in parallel. |
+| 🔌 | **MCP** | stdio and streamable-HTTP servers from `.mcp.json`, `.ice/mcp.json` and `~/.ice/mcp.json`. Manage them with `ice mcp add/list/remove`. |
+| 🪝 | **Hooks** | `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop` and `SessionStart` shell hooks. Exit code 2 blocks the action and tells the model why. |
+| 💾 | **Sessions** | Every conversation is saved under `~/.ice/projects/`. Pick up with `ice -c`, `ice -r`, or `/resume`. `/rewind` (or Esc Esc) jumps back to an earlier message. |
+| 📦 | **Context** | Real token usage and cost per turn, `/context` breakdown, and automatic compaction before the window fills (`/compact` on demand). |
+| 🧾 | **Scripting** | `ice -p` prints the result, with `--output-format json` or `stream-json` and piped stdin. |
+| 🎯 | **Goals** | `/goal <outcome>` keeps an objective in every turn until you clear it. |
+
+## Commands
+
+### Shell
 
 | Command | Purpose |
 | --- | --- |
-| `ice` | Open the interactive workspace |
-| `ice --demo` | Explore the offline demo |
-| `ice --cwd /path/to/project` | Select a workspace |
-| `ice -p "your goal"` | Run a headless burst |
-| `ice -p "your goal" --goal-loop --max-turns 4` | Run a bounded goal loop |
-| `ice init /path/to/project` | Initialize `.ice/` workspace files |
-| `ice inspect` | Print environment information |
-| `ice --version` | Show the installed version |
-| `ice --help` | Show CLI usage |
+| `ice` | Interactive session in the current directory |
+| `ice "prompt"` | Start with a first message |
+| `ice -p "prompt"` | Print the answer and exit (`--output-format text\|json\|stream-json`) |
+| `cat log \| ice -p "why did this fail?"` | Pipe content in |
+| `ice -c` / `ice -r [ID]` | Continue the latest conversation / resume one |
+| `ice --model sonnet` | Model for this session (aliases: `sonnet`, `opus`, `haiku`) |
+| `ice --permission-mode plan\|acceptEdits` | Start in a permission mode |
+| `ice --allowedTools "Bash(git log:*)" Edit` | Pre-approve tools (`--disallowedTools` to block) |
+| `ice --max-turns 5 --append-system-prompt "…"` | Scripting controls |
+| `ice login [provider]` / `ice logout` | Browser sign-in (PKCE) or API key / remove credentials |
+| `ice mcp add NAME -- CMD ARGS…` · `ice mcp list` · `ice mcp remove NAME` | Manage MCP servers (`--transport http`, `--scope local\|project\|user`) |
+| `ice config list\|get\|set\|path` | Settings |
+| `ice init` | Scaffold `.ice/` (shared settings, example command and agent) |
+| `ice update [--check]` | Pull and rebuild (source install) or download (binary install) |
+| `ice doctor` | Check the installation, providers, settings and MCP |
+| `ice completions bash\|zsh\|fish\|powershell` | Shell completions |
 
 ### Inside ICE
 
 | Command | Purpose |
 | --- | --- |
-| `/onboard` | Provider, key and model setup |
-| `/providers`, `/models`, `/model NAME` | Provider and model configuration |
-| `/goal`, `/loop`, `/agent NAME: TASK` | Goals, loops and delegated tasks |
-| `/todo Write a regression test`, `/todo done ID` | Add and complete a task |
-| `/skills`, `/mcp` | Inspect installed skills and MCP tools |
-| `/theme ice`, `/theme frost`, `/theme mono` | Change the palette; `groknight` and `ember` are also available |
-| `/think` | Toggle visible thinking output |
-| `/home`, `/new` | Return home or start a fresh session |
-| `/demo`, `/live` | Switch execution mode |
-| `/help`, `/exit` | Command guide and exit |
+| `/onboard`, `/login`, `/logout` | Connect a provider (browser OAuth or key) |
+| `/model`, `/providers` | Switch model / list providers |
+| `/goal <text>` | Give intent a direction (`/goal clear`) |
+| `/init` | Generate `ICE.md` for this codebase |
+| `/memory` | Edit memory files in `$EDITOR` |
+| `/clear`, `/compact [focus]` | Fresh context / summarise and continue |
+| `/resume`, `/rewind` | Reopen a conversation / go back to an earlier message |
+| `/cost`, `/context`, `/status` | Usage, context breakdown, setup |
+| `/permissions [allow\|deny\|remove RULE]` | Show and edit rules |
+| `/mcp`, `/agents`, `/skills`, `/hooks`, `/bashes`, `/todos` | Integrations and state |
+| `/review [PR]` | Review your changes or a pull request |
+| `/config`, `/theme` | Settings panel / colour theme |
+| `/export [file]`, `/doctor`, `/help`, `/exit` | Utilities |
+| `/your-command` | Custom commands from `.ice/commands/*.md` (`$ARGUMENTS`, `$1`…) |
 
-### Keyboard
+### Keys
 
-`Enter` send · `Ctrl+L` command guide · `Esc` close/skip/back · `Ctrl+C` exit  
-`←` / `→` edit · `Home` / `End` move cursor · `↑` / `↓` select or scroll · `Page Up` / `Page Down` scroll
+`Enter` send · `\`+`Enter`, `Alt+Enter` or `Ctrl+J` newline · `Esc` interrupt · `Esc Esc` rewind · `Shift+Tab` cycle permission modes · `↑`/`↓` history · `Tab` complete `/commands` and `@files` · `Ctrl+R` full transcript · `Ctrl+T` todos · `Ctrl+L` shortcut help · `Ctrl+C` twice to exit.
 
-## Comparison on the same no-LLM metrics
+Prefixes: `!cmd` runs a shell command directly (its output joins the conversation), `#note` saves a memory, `@path` attaches a file.
 
-Only columns we actually timed for ICE. Other cells are **published
-infrastructure numbers** for that same kind of work (startup, spawn,
-tool dispatch, RAM, disk, patch, cancel). Empty cell = nobody published
-that microbench. No Terminal-Bench / SWE-bench / model IQ in this table.
+## Permissions
 
-ICE row: this 2 vCPU box, 2026-09-15, engine path, no model.
+| Mode | Behaviour |
+| --- | --- |
+| **default** | Ask before edits, most shell commands, web fetches and MCP tools. Read-only commands (`git status`, `ls`, `grep`…) run freely. |
+| **acceptEdits** | File edits inside the project (plus `mkdir`/`touch`/`cp`/`mv`) are auto-approved. |
+| **plan** | Read-only research. ICE presents a plan and waits for your approval before changing anything. |
+| **bypassPermissions** | Never ask. Only for sandboxes (`--dangerously-skip-permissions`). |
 
-| Metric | ICE (measured) | Claude Code | Codex CLI | OpenCode | Aider | Goose / others |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Startup / `--version` or engine import | **0.003 ms** import | 86–446 ms `--version`; TUI **3.5 s** to first frame | 35–38 ms `--version`; TUI input **152–250 ms**; catalog path **5.1 s** | TUI ready **1.05 s** | 5–20 s (Python + LiteLLM fetch) | jcode 49 ms; pi 596 ms; Copilot CLI 1.6 s; Cursor Agent 2.0 s |
-| Process spawn `/bin/true` | **1.15 ms** | ~4 ms raw; bwrap+true **13 ms** | — | — | — | — |
-| Tool dispatch `echo` / Bash noop | **4.8 ms** p50 | shell-fixed **65 ms**; sandbox off **~445 ms** total; sandbox on **8–16 s** stall | non-shell tool **~22 ms**; elevated Win sandbox **~88 s** before spawn | — | — | Copilot median tool **166 ms** |
-| Parallel 100 noops | **106 ms** | parallel Bash + sandbox **15–16 s / call** in one report | — | — | — | — |
-| File write 2k small | **141 ms** | — | — | — | `/drop *` on 19k-file repo: **minutes** | — |
-| File read 2k | **26 ms** | — | — | — | — | Copilot `get_file` tens of ms |
-| File search | **14 ms** `rg` | — | Seatbelt on every `rg` adds wall-clock in fork/exec traces | — | repo-map token pass, not timed | — |
-| Patch 200 files | **18 ms** | Write/Edit usually seconds when healthy | `apply_patch` in traces (model-bound) | — | apply-patch is local after stream | Copilot `apply_patch` **250–600 ms** p50 |
-| Diff 200 files | **6.7 ms** | — | — | — | live diff while streaming (model) | — |
-| Git init+commit+branch | **37 ms** | `git status/diff/commit` **~5 s** when zsh startup was 1 s; **65 ms** after | — | — | uses git directly | — |
-| JSON / IPC | **0.16 ms** | — | — | — | — | — |
-| Context load ~143 KB src | **3.5 ms** | — | cold `~/.codex` I/O **1–5 min** if logs DB 419 MB | — | repo-map 1024 tok default | — |
-| Timeout accuracy | **202 ms** on 200 ms cap | — | — | — | — | — |
-| Cancel | **1.3 ms** | — | — | — | — | — |
-| Isolation | two dirs, pass | sandbox / bwrap | Seatbelt / Landlock | session | git worktree | container / Harbor |
-| Disk of harness state | **`.ice` 4.6 KB** | shell snapshots + session | `~/.codex` can hit **1 GB+** (419 MB sqlite + 625 MB sessions) | — | `.aider*` | — |
-| Idle / bench RSS | **73 MB** process (Δ 0) | **166–192 MB** `--version` | **46 MB** `--version` | — | Python process, not published | Claw Rust CLI **4.1 MB** |
-| Sandbox extra | none in this bench | bwrap prep **8–16 s**; binary itself 13 ms | Seatbelt **+49%** wall vs off in one ablation | — | none | Docker/microVM 90 ms–1 s typical cold |
-| Cleanup 500 files | **0.16 ms** | — | — | — | — | — |
-| Error propagate `exit 7` | **4.6 ms**, code 7 | — | — | — | — | — |
-| Stream first chunk | **11 ms** | — | — | — | — | — |
-| Backpressure 2 MB stdout | **17 ms** | — | — | — | — | — |
+Rules live in `.ice/settings.json` (shared), `.ice/settings.local.json` (personal, git-ignored) and `~/.ice/settings.json`:
 
-### Sources for the other columns
+```json
+{
+  "permissions": {
+    "allow": ["Bash(npm run test:*)", "Bash(git diff:*)", "WebFetch(domain:docs.rs)", "mcp__github"],
+    "deny":  ["Read(./.env)", "Bash(curl:*)"],
+    "defaultMode": "acceptEdits"
+  }
+}
+```
 
-- Claude / Codex / Claw **startup + RAM + binary**: claw-bench on Ubuntu 24.04 (`--version`, idle RSS).
-- TUI time-to-ready / first frame: jcode.sh PTY launch board (Claude Code 3513 ms, Codex 906 ms, OpenCode 1048 ms).
-- Claude Code Bash dispatch: session timestamps 964 ms → 65 ms after shell-init fix; GitHub #56274 sandbox stall 8–16 s vs 80 ms spawn / 445 ms total with sandbox off; `/bin/true` ~4 ms, bwrap+true 13 ms.
-- Codex TUI probes: upstream PR ~250 ms → 152 ms to accept input; issue #28877 `codex debug models` 5.1 s vs `--bundled` 60–80 ms; issue #28166 cold start 1–5 min on fat `~/.codex`.
-- Codex Windows elevated sandbox: issue #31958, ~88 s before `powershell.exe`.
-- Aider startup: issue #3111, 10–20 s (was <5 s), LiteLLM HTTP on boot.
-- Copilot production traces: median tool 166 ms; `apply_patch` / `replace_string` 0.25–0.6 s.
-- Git slowness under Claude Code: NIV tech, zsh -c true 1 s → 15 ms; Bash tool 964 ms → 65 ms.
+A compound command is allowed only if every part is allowed, and it is denied if any part is denied. Paths resolve through symlinks, so a link pointing outside the project doesn't count as inside it. Choosing "don't ask again" in a prompt saves the matching rule for you.
 
-Machines differ. Treat other-CLI cells as **published order of magnitude**, ICE cells as **this host**.
+## Configuration
 
-### What the matching columns say
+| File | Purpose |
+| --- | --- |
+| `~/.ice/settings.json`, `.ice/settings.json`, `.ice/settings.local.json` | `permissions`, `hooks`, `env`, `model`, `theme`, `oauth`, `autoCompactEnabled`, `autoUpdates`, `cleanupPeriodDays` |
+| `~/.ice/credentials.json` | Saved API keys and OAuth tokens (0600) |
+| `~/.ice/config.json` | Active provider/model and trusted folders |
+| `ICE.md`, `ICE.local.md`, `~/.ice/ICE.md` | Instructions for ICE (also reads `CLAUDE.md`, `AGENTS.md`) |
+| `.mcp.json`, `.ice/mcp.json`, `~/.ice/mcp.json` | MCP servers |
+| `.ice/commands/`, `.ice/agents/`, `.ice/skills/` | Custom commands, sub-agents and skills (`.claude/…` layouts work too) |
 
-1. **Dispatch, not spawn.** Raw `/bin/true` is 1–4 ms everywhere. Claude Code’s extra is snapshot + sandbox prep (65 ms healthy, seconds when sandbox path stalls). ICE’s extra on this host is ~4 ms.
-2. **Startup is a product choice.** Rust `--version` is tens of ms (Codex 38 ms, Claw 1.2 ms). Node TUI first frame is 1–3.5 s (OpenCode / Claude Code). ICE engine import is microseconds; a full Rust TUI binary was not built here so we do not invent a first-frame number.
-3. **State on disk bites later.** ICE `.ice` is 4.6 KB. Codex published a 1 GB+ `~/.codex` that turned cold start into minutes. That is a harness metric, not a model metric.
-4. **Sandbox is the hidden tax.** Same Bash tool: 445 ms off vs 8–16 s on (Claude); Seatbelt +49% wall (Codex ablation); 88 s elevated Windows. ICE’s measured row has no container.
-5. **Empty cells matter.** Nobody shipped a public “write 2k files / parse IR / cancel SIGTERM” number for Goose or OpenHands. We do not fill them with TB scores.
-
-## Installation options
+Useful environment variables: `ICE_PROVIDER`, `ICE_MODEL`, `ICE_BASE_URL`, `ICE_API_KEY`, `ICE_MAX_OUTPUT_TOKENS`, `ICE_CONFIG_DIR`, `ICE_TEXT_TOOLS`, `ICE_NO_AUTO_UPDATE`, `HTTPS_PROXY`/`NO_PROXY`, `NO_COLOR`.
 
 <details>
-<summary><strong>Choose a version or installation directory</strong></summary>
+<summary><strong>Hooks example</strong></summary>
 
-Linux or macOS:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/loayabdalslam/ICE/main/install.sh | bash -s -- --version 0.2.0 --bin-dir "$HOME/.local/bin"
+```json
+{
+  "hooks": {
+    "PreToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "./scripts/check-command.sh" }] }],
+    "PostToolUse": [{ "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "cargo fmt" }] }]
+  }
+}
 ```
 
-Windows:
-
-```powershell
-$env:ICE_VERSION = '0.2.0'
-$env:ICE_INSTALL_DIR = "$env:LOCALAPPDATA\Programs\ICE"
-irm https://raw.githubusercontent.com/loayabdalslam/ICE/main/install.ps1 | iex
-```
-
-Defaults: Windows `%LOCALAPPDATA%\Programs\ICE`; Linux/macOS `~/.local/bin`. No `sudo` or administrator prompt is used. Shell installers configure Bash or Zsh startup files when needed; Windows updates your user PATH. Use `--no-path` or `-NoPath` to opt out.
-
+The hook receives the event as JSON on stdin. Exit code 2 blocks the action and its stderr goes back to the model.
 </details>
 
-<details>
-<summary><strong>Download and inspect before installation</strong></summary>
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/loayabdalslam/ICE/main/install.sh -o ice-install.sh
-less ice-install.sh
-bash ice-install.sh --no-path
-```
-
-```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/loayabdalslam/ICE/main/install.ps1 -OutFile ice-install.ps1
-Get-Content .\ice-install.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\ice-install.ps1 -NoPath
-```
-
-`--download-only` / `-DownloadOnly` saves a verified binary without running it or changing PATH. `ICE_BASE_URL` supports an HTTPS mirror with the same repository layout. Binary checksums detect corruption and mismatched files; they are not independent code-signing signatures.
-
-</details>
-
-<details>
-<summary><strong>Reduce motion</strong></summary>
-
-```bash
-ICE_REDUCED_MOTION=1 ice
-```
-
-```powershell
-$env:ICE_REDUCED_MOTION = '1'
-ice
-```
-
-</details>
-
-<details>
-<summary><strong>Uninstall</strong></summary>
-
-Windows: download `install.ps1` as shown above, then run `powershell -NoProfile -ExecutionPolicy Bypass -File .\ice-install.ps1 -Uninstall`. Pass your original `-InstallDir` if you used a custom directory. This removes the installed executable and the PATH entry the installer added.
-
-Linux/macOS: remove the installed `~/.local/bin/ice` file, or the `ice` file in your custom installation directory. You can also remove the `# ICE binary installation` line and its following export from `.bashrc`, `.bash_profile` or `.zshrc`. Workspace `.ice/` directories and provider configuration remain yours.
-
-</details>
-
-## How installation works
+## How it works
 
 ```text
-LATEST → release version → operating system + CPU → binary → SHA-256 → install → ice
+you ─▶ REPL (inline TUI) ─▶ engine worker ─▶ model adapter (Anthropic | OpenAI-compatible | text protocol)
+                                  │                      ▲ SSE stream (text · thinking · tool_use)
+                                  ▼                      │
+                     permissions + hooks ─▶ tools / MCP / sub-agents ─▶ tool_result ─┘
+                                  │
+                                  └─▶ transcript (~/.ice/projects/…/<session>.jsonl)
 ```
 
-[`LATEST`](LATEST) contains a single version. [`releases/`](releases/) contains versioned executables and a `SHA256SUMS.txt` manifest per version. Installers select one binary; they do not clone application source or run a compiler. A missing platform, failed download or checksum mismatch stops installation before replacing an existing binary.
+See [docs/architecture.md](docs/architecture.md) for the module map and the life of one turn, and [ROADMAP.md](ROADMAP.md) for what's next.
 
-```text
-LATEST
-install.ps1                 Windows installer
-install.sh                  Linux / macOS auto-detection
-windows/install.ps1         Dedicated Windows entry point
-bash/install.sh             Dedicated Linux entry point
-mac/install.sh              Dedicated macOS entry point
-releases/0.4.4/             Binaries + checksums
-assets/                     Brand artwork + actual SVG icons
-docs/                       Setup, verification and website snippets
-licenses/                   Third-party notices
+## Development
+
+```bash
+cargo build                  # debug build
+cargo test                   # unit tests + end-to-end tests against a mock LLM server
+cargo clippy --all-targets -- -D warnings
+cargo fmt --all
 ```
 
-## Add ICE to your website
-
-Copy one of the three commands in [Install](#install), or use the ready-to-paste buttons and command blocks in [`docs/WEBSITE.md`](docs/WEBSITE.md). The URLs stay the same across releases because the installers resolve `LATEST`.
+CI runs formatting, clippy, the tests on Linux, macOS and Windows, a release build, and an installer smoke test that clones and builds the commit. Tagging `vX.Y.Z` runs the release workflow, which publishes checksummed binaries for five targets.
 
 ## Troubleshooting
 
-| Symptom | Next step |
+| Symptom | Fix |
 | --- | --- |
-| `ice` is not recognized | Open a new terminal, or run the binary by its full installed path. |
-| `bash` is missing on Windows | Install Git for Windows and expose `bash.exe` on PATH. |
-| A release or platform is unavailable | Check the platform table and `LATEST`; the installer does not substitute a binary from a different OS. |
-| Checksum mismatch | Stop and re-download. Verify that your mirror contains a matching release manifest. |
-| macOS blocks an unnotarized binary | Review the downloaded software using your normal macOS security workflow. The installer does not change Gatekeeper settings. |
-| The model cannot connect | Reopen `/onboard`, check your provider key and network, then use `/models`. |
-| Strange borders or missing glyphs | Use a Unicode terminal with a monospace font and sufficient viewport size. |
+| `ice` not found after install | Open a new terminal, or add the install directory to `PATH`. |
+| "No model is configured" | Run `/onboard` (or `ice login`), or export a provider key. |
+| Build fails during install | Install a C toolchain (see Requirements), or use `--binary`. |
+| Behind a proxy | Set `HTTPS_PROXY` (and `NO_PROXY` for local servers). ICE honours both. |
+| Odd colours or glyphs | Use a Unicode terminal. ICE switches to 256 colours automatically and respects `NO_COLOR`. |
+| Anything else | Run `ice doctor`, then [open an issue](https://github.com/loayabdalslam/ICE/issues/new) (remove keys from logs). |
 
-## Feedback & credits
+## License
 
-[Report a bug](https://github.com/loayabdalslam/ICE/issues/new) with your ICE version, operating system, terminal and reproduction steps. Remove API keys and private project content from logs before sharing them.
-
-ICE's application package declares the [Apache-2.0 license](LICENSE). Dependency notices are included in [`licenses/`](licenses/). The SVG UI and platform icons are from [Bootstrap Icons](https://github.com/twbs/icons), licensed under [MIT](assets/icons/LICENSE). FLOE and the ICE identity assets are included for presenting this distribution.
+[Apache-2.0](LICENSE). The UI icons are from [Bootstrap Icons](https://github.com/twbs/icons) (MIT). FLOE and the ICE identity assets belong to this project.
 
 <p align="center"><img src="assets/floe.svg" width="72" alt="FLOE"><br><strong>Intent. Compile. Execute.</strong><br><sub>Built for the terminal. Made for your next idea.</sub></p>

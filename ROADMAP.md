@@ -1,4 +1,31 @@
-# ICE Roadmap: from prototype to a finished CLI
+# ICE Roadmap
+
+## Status after 0.5.0
+
+Most of the plan below shipped in 0.5.0:
+
+| Area | Status |
+|---|---|
+| Keys out of argv, no shared temp files, in-process HTTPS with retries, proxy + NO_PROXY | ✅ done |
+| Permission modes, allow/deny/ask rules, symlink-aware containment, hooks | ✅ done |
+| Streaming, native tool calling (Anthropic + OpenAI-compatible), text-protocol fallback | ✅ done |
+| Claude-Code-compatible tools, background shells, sub-agents, MCP stdio + HTTP | ✅ done |
+| clap CLI, print mode (text/json/stream-json), exit codes, completions, `ice doctor` | ✅ done |
+| Layered settings, credentials store, OAuth 2.0 + PKCE browser sign-in | ✅ done |
+| Sessions (`--continue`, `--resume`, `/rewind`), auto-compaction, `/context`, `/cost` | ✅ done |
+| Inline REPL with the ICE home screen, markdown, diffs, pickers, panic-safe terminal | ✅ done |
+| CI on 3 OSes, end-to-end tests against a mock LLM, clippy `-D warnings` | ✅ done |
+| Installers that clone + build from source, `ice update` for source/binary installs | ✅ done |
+| LICENSE, rewritten README, architecture doc | ✅ done |
+| Binaries moved out of git to GitHub Releases, signed releases, package managers | ⏳ next |
+| Syntax highlighting in diffs and code blocks, vim mode, image input | ⏳ next |
+| End-to-end task benchmark vs other CLIs (graduation evaluation chapter) | ⏳ next |
+
+The original plan follows for reference.
+
+---
+
+# Original plan (2026-09-24): from prototype to a finished CLI
 
 Written 2026-09-24 against `0.4.4` (commit `121c619`).
 
