@@ -60,7 +60,7 @@ Requirements: `git`, a C linker (`build-essential` on Linux, Xcode command-line 
 | `-Uninstall` | Windows: remove ICE and the PATH entry |
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/loayabdalslam/ICE/main/install.sh | bash -s -- --ref v0.5.5 --bin-dir ~/bin
+curl -fsSL https://raw.githubusercontent.com/loayabdalslam/ICE/main/install.sh | bash -s -- --ref main --bin-dir ~/bin
 ```
 
 Or build it yourself:
