@@ -8,6 +8,7 @@ use crate::tools::{DiffLine, Display, TodoItem, ToolOutput};
 use crossterm::style::Color;
 use serde_json::Value;
 use std::path::Path;
+use unicode_bidi::{bidi_class, BidiClass};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -115,6 +116,15 @@ pub fn char_w(c: char) -> usize {
 
 pub fn str_w(s: &str) -> usize {
     s.chars().map(char_w).sum()
+}
+
+pub fn has_rtl(s: &str) -> bool {
+    s.chars()
+        .any(|c| matches!(bidi_class(c), BidiClass::R | BidiClass::AL | BidiClass::AN))
+}
+
+pub fn isolate_rtl(s: &str) -> String {
+    format!("\u{2068}{s}\u{2069}")
 }
 
 /// Truncate to `max` display cells, adding "…" when cut.
@@ -989,6 +999,14 @@ mod tests {
         // Wide characters count as two cells.
         let rows = wrap(&Line::raw("日本語テキストです"), 8, 0);
         assert!(rows.iter().all(|r| r.width() <= 8));
+    }
+
+    #[test]
+    fn rtl_isolation_controls_do_not_change_terminal_width() {
+        let text = "مرحبا";
+        assert!(has_rtl(text));
+        assert_eq!(str_w(&isolate_rtl(text)), str_w(text));
+        assert!(!has_rtl("hello 123"));
     }
 
     #[test]

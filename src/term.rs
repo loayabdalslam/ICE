@@ -60,12 +60,23 @@ impl Screen {
 
     fn write_line(&mut self, l: &Line) -> io::Result<()> {
         let mut used = 0;
+        let already_isolated = l.text().contains('\u{2068}');
+        let isolate = !already_isolated
+            && l.spans
+                .iter()
+                .any(|span| crate::render::has_rtl(&span.text));
+        if isolate {
+            self.out.queue(Print("\u{2068}"))?;
+        }
         for s in &l.spans {
             self.style(&s.style)?;
             self.out.queue(Print(&s.text))?;
             used += crate::render::str_w(&s.text);
             self.out.queue(SetAttribute(Attribute::Reset))?;
             self.out.queue(ResetColor)?;
+        }
+        if isolate {
+            self.out.queue(Print("\u{2069}"))?;
         }
         if let Some(bg) = l.fill {
             if !self.no_color && used < self.cols() {

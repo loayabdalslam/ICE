@@ -1520,7 +1520,7 @@ impl Repl {
             return;
         }
         let lines = s.lines().count();
-        if s.len() > 800 || lines > 10 {
+        if should_clip_paste(&s) {
             self.pastes.push(s);
             let tag = format!("[Pasted text #{} +{} lines]", self.pastes.len(), lines);
             self.input.insert_str(&tag);
@@ -1887,12 +1887,7 @@ impl Repl {
             return;
         }
         // Expand pasted-text placeholders.
-        let mut text = raw.clone();
-        for (i, p) in self.pastes.iter().enumerate() {
-            let re =
-                regex::Regex::new(&format!(r"\[Pasted text #{} \+\d+ lines\]", i + 1)).unwrap();
-            text = re.replace_all(&text, regex::NoExpand(p)).into_owned();
-        }
+        let text = expand_pasted_text(&raw, &self.pastes);
         self.pastes.clear();
         push_history(&mut self.history, &raw);
         self.submit_text(text);
@@ -1941,6 +1936,41 @@ impl Repl {
         self.stream_chars = 0;
         self.cancel.store(false, Ordering::Relaxed);
         self.send(Cmd::Submit(prompt));
+    }
+}
+
+fn should_clip_paste(text: &str) -> bool {
+    text.chars().count() > 800 || text.lines().count() > 10
+}
+
+fn expand_pasted_text(raw: &str, pastes: &[String]) -> String {
+    let mut text = raw.to_string();
+    for (index, paste) in pastes.iter().enumerate() {
+        let pattern =
+            regex::Regex::new(&format!(r"\[Pasted text #{} \+\d+ lines\]", index + 1)).unwrap();
+        text = pattern
+            .replace_all(&text, regex::NoExpand(paste))
+            .into_owned();
+    }
+    text
+}
+
+#[cfg(test)]
+mod paste_tests {
+    use super::{expand_pasted_text, should_clip_paste};
+
+    #[test]
+    fn large_pastes_are_summarized_and_restored_without_byte_bias() {
+        assert!(!should_clip_paste(&"ع".repeat(800)));
+        assert!(should_clip_paste(&"ع".repeat(801)));
+        assert!(should_clip_paste(&"line\n".repeat(11)));
+
+        let pasted = "سطر أول\nسطر ثانٍ".to_string();
+        let placeholder = "Please review [Pasted text #1 +2 lines]";
+        assert_eq!(
+            expand_pasted_text(placeholder, &[pasted.clone()]),
+            format!("Please review {pasted}")
+        );
     }
 }
 

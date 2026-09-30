@@ -3,6 +3,7 @@
 //! box with an exact caret position.
 
 use crate::render::char_w;
+use unicode_bidi::{get_base_direction, BidiInfo, Direction, Level};
 
 #[derive(Clone, Debug, Default)]
 pub struct Editor {
@@ -71,11 +72,66 @@ impl Editor {
     }
 
     pub fn left(&mut self) {
-        self.cursor = self.prev_boundary(self.cursor);
+        self.move_visual(false);
     }
 
     pub fn right(&mut self) {
-        self.cursor = self.next_boundary(self.cursor);
+        self.move_visual(true);
+    }
+
+    fn move_visual(&mut self, right: bool) {
+        let start = self.line_start();
+        let end = self.line_end();
+        let line = &self.text[start..end];
+        if !crate::render::has_rtl(line) {
+            self.cursor = if right {
+                self.next_boundary(self.cursor)
+            } else {
+                self.prev_boundary(self.cursor)
+            };
+            return;
+        }
+
+        let columns = visual_caret_columns(line);
+        let current_index = self.text[start..self.cursor].chars().count();
+        let current_column = columns[current_index];
+        let mut target: Option<(usize, usize)> = None;
+        for (char_index, (byte_index, _)) in line.char_indices().enumerate() {
+            let column = columns[char_index];
+            if (right && column > current_column) || (!right && column < current_column) {
+                let is_closer = target
+                    .map(|(_, best_column)| {
+                        if right {
+                            column < best_column
+                        } else {
+                            column > best_column
+                        }
+                    })
+                    .unwrap_or(true);
+                if is_closer {
+                    target = Some((byte_index, column));
+                }
+            }
+        }
+        let end_index = line.chars().count();
+        let end_column = columns[end_index];
+        if (right && end_column > current_column) || (!right && end_column < current_column) {
+            let is_closer = target
+                .map(|(_, best_column)| {
+                    if right {
+                        end_column < best_column
+                    } else {
+                        end_column > best_column
+                    }
+                })
+                .unwrap_or(true);
+            if is_closer {
+                target = Some((line.len(), end_column));
+            }
+        }
+        if let Some((byte_index, _)) = target {
+            self.cursor = start + byte_index;
+        }
     }
 
     fn is_word(c: char) -> bool {
@@ -171,18 +227,16 @@ impl Editor {
         if self.on_first_line() {
             return false;
         }
-        let col = self.text[self.line_start()..self.cursor].chars().count();
         let cur_start = self.line_start();
+        let current_line = &self.text[cur_start..self.line_end()];
+        let current_boundary = self.text[cur_start..self.cursor].chars().count();
+        let col = visual_caret_columns(current_line)[current_boundary];
         let prev_end = cur_start - 1;
         let prev_start = self.text[..prev_end]
             .rfind('\n')
             .map(|i| i + 1)
             .unwrap_or(0);
-        self.cursor = self.text[prev_start..prev_end]
-            .char_indices()
-            .nth(col)
-            .map(|(i, _)| prev_start + i)
-            .unwrap_or(prev_end);
+        self.cursor = prev_start + byte_at_visual_column(&self.text[prev_start..prev_end], col);
         true
     }
 
@@ -190,17 +244,16 @@ impl Editor {
         if self.on_last_line() {
             return false;
         }
-        let col = self.text[self.line_start()..self.cursor].chars().count();
+        let cur_start = self.line_start();
+        let current_line = &self.text[cur_start..self.line_end()];
+        let current_boundary = self.text[cur_start..self.cursor].chars().count();
+        let col = visual_caret_columns(current_line)[current_boundary];
         let next_start = self.line_end() + 1;
         let next_end = self.text[next_start..]
             .find('\n')
             .map(|i| next_start + i)
             .unwrap_or(self.text.len());
-        self.cursor = self.text[next_start..next_end]
-            .char_indices()
-            .nth(col)
-            .map(|(i, _)| next_start + i)
-            .unwrap_or(next_end);
+        self.cursor = next_start + byte_at_visual_column(&self.text[next_start..next_end], col);
         true
     }
 
@@ -226,9 +279,11 @@ impl Editor {
         let mut rows: Vec<String> = vec![String::new()];
         let mut w = 0;
         let mut caret = (0, 0);
+        let mut caret_byte = 0;
         for (i, c) in self.text.char_indices() {
             if i == self.cursor {
                 caret = (rows.len() - 1, w);
+                caret_byte = rows.last().unwrap().len();
             }
             if c == '\n' {
                 rows.push(String::new());
@@ -248,6 +303,7 @@ impl Editor {
                 w = 0;
                 if i == self.cursor {
                     caret = (rows.len() - 1, 0);
+                    caret_byte = 0;
                 }
             }
             rows.last_mut().unwrap().push(shown);
@@ -259,9 +315,86 @@ impl Editor {
                 w = 0;
             }
             caret = (rows.len() - 1, w);
+            caret_byte = rows.last().unwrap().len();
+        }
+        if !masked {
+            let row = &rows[caret.0];
+            let boundary = row[..caret_byte].chars().count();
+            caret.1 = visual_caret_columns(row)[boundary];
+            for row in &mut rows {
+                if crate::render::has_rtl(row) {
+                    *row = crate::render::isolate_rtl(row);
+                }
+            }
         }
         (rows, caret)
     }
+}
+
+fn visual_caret_columns(text: &str) -> Vec<usize> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut columns = vec![0; chars.len() + 1];
+    if chars.is_empty() {
+        return columns;
+    }
+    if !crate::render::has_rtl(text) {
+        for (index, c) in chars.iter().enumerate() {
+            columns[index + 1] = columns[index] + char_w(*c);
+        }
+        return columns;
+    }
+
+    let base_level = if get_base_direction(text) == Direction::Rtl {
+        Level::rtl()
+    } else {
+        Level::ltr()
+    };
+    let bidi = BidiInfo::new(text, Some(base_level));
+    let Some(paragraph) = bidi.paragraphs.first() else {
+        return columns;
+    };
+    let levels = bidi.reordered_levels_per_char(paragraph, 0..text.len());
+    let visual_to_logical = BidiInfo::reorder_visual(&levels);
+    let mut logical_to_visual = vec![0; chars.len()];
+    let mut visual_columns = vec![0; chars.len() + 1];
+    for (visual_index, logical_index) in visual_to_logical.iter().enumerate() {
+        logical_to_visual[*logical_index] = visual_index;
+        visual_columns[visual_index + 1] =
+            visual_columns[visual_index] + char_w(chars[*logical_index]);
+    }
+    for boundary in 0..=chars.len() {
+        let char_index = if boundary == 0 { 0 } else { boundary - 1 };
+        let visual_index = logical_to_visual[char_index];
+        let include_char = if boundary == 0 {
+            levels[char_index].is_rtl()
+        } else {
+            !levels[char_index].is_rtl()
+        };
+        columns[boundary] = visual_columns[visual_index]
+            + if include_char {
+                char_w(chars[char_index])
+            } else {
+                0
+            };
+    }
+    columns
+}
+
+fn byte_at_visual_column(text: &str, column: usize) -> usize {
+    let columns = visual_caret_columns(text);
+    let mut best_boundary = 0;
+    let mut best_distance = usize::MAX;
+    for (boundary, visual_column) in columns.iter().enumerate() {
+        let distance = visual_column.abs_diff(column);
+        if distance < best_distance {
+            best_boundary = boundary;
+            best_distance = distance;
+        }
+    }
+    text.char_indices()
+        .nth(best_boundary)
+        .map(|(byte_index, _)| byte_index)
+        .unwrap_or(text.len())
 }
 
 #[cfg(test)]
@@ -314,5 +447,37 @@ mod tests {
         assert_eq!(tok, "@src/ma");
         e.replace_range(start, e.cursor, "@src/main.rs ");
         assert_eq!(e.text, "look at @src/main.rs ");
+    }
+
+    #[test]
+    fn arabic_layout_and_horizontal_movement_follow_visual_direction() {
+        let mut e = Editor::default();
+        e.set("مرحبا");
+        let (rows, caret) = e.layout(20, false);
+        assert_eq!(rows[0], crate::render::isolate_rtl("مرحبا"));
+        assert_eq!(caret, (0, 0));
+        e.home();
+        assert_eq!(e.layout(20, false).1, (0, 5));
+
+        e.end();
+        e.right();
+        assert_eq!(e.cursor, "مرحبا".len() - "ا".len());
+    }
+
+    #[test]
+    fn mixed_arabic_and_latin_keeps_the_visual_caret_in_the_rtl_run() {
+        let mut e = Editor::default();
+        e.set("abc مرحبا");
+        assert_eq!(e.layout(20, false).1, (0, 4));
+        e.right();
+        assert_ne!(e.cursor, "abc مرحبا".len());
+    }
+
+    #[test]
+    fn vertical_movement_preserves_visual_column_in_rtl_text() {
+        let mut e = Editor::default();
+        e.set("مرحبا\nعالم");
+        assert!(e.up());
+        assert_eq!(e.cursor, "مرحبا".len());
     }
 }
