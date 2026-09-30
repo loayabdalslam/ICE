@@ -1072,9 +1072,19 @@ pub fn on_picker_key(r: &mut Repl, k: KeyEvent) {
                 set_theme(r, *t);
             }
         }
-        PickerKind::Model(list) => {
-            if let Some(m) = list.get(choice) {
+        PickerKind::Model {
+            models,
+            custom_index,
+        } => {
+            if choice == custom_index {
+                open_custom_model_picker(r);
+            } else if let Some(m) = models.get(choice) {
                 set_model(r, m);
+            }
+        }
+        PickerKind::CustomModel => {
+            if !text.is_empty() {
+                set_model(r, &text);
             }
         }
         PickerKind::Resume(list) => {
@@ -1188,8 +1198,6 @@ pub fn on_picker_key(r: &mut Repl, k: KeyEvent) {
                     "Login successful · {} · model {} (change with /model)",
                     p.name, p.default_model
                 )));
-            }
-            if p.id == "custom" || p.id == "ollama" {
                 open_model_picker(r);
             }
         }
@@ -1306,6 +1314,7 @@ pub fn oauth_finished(r: &mut Repl, provider: usize, res: Result<crate::oauth::T
                 "Signed in to {} with your browser (OAuth PKCE) · model {} (change with /model)",
                 p.name, p.default_model
             )));
+            open_model_picker(r);
         }
         Err(e) if e.contains("cancelled") => r.items.push(Item::Notice("Sign-in cancelled".into())),
         Err(e) => r
@@ -1536,8 +1545,29 @@ fn open_model_picker(r: &mut Repl) {
             Style::fg(r.theme.dim),
         ),
     ];
-    let mut pk = picker("Select model", body, options, PickerKind::Model(models));
+    let custom_index = models.len();
+    options.push(("Add custom model...".into(), "Enter a model ID".into()));
+    let mut pk = picker(
+        "Select model",
+        body,
+        options,
+        PickerKind::Model {
+            models,
+            custom_index,
+        },
+    );
     pk.idx = idx;
+    r.picker = Some(pk);
+}
+
+fn open_custom_model_picker(r: &mut Repl) {
+    let mut pk = picker(
+        "Custom model",
+        vec![Line::raw("Enter the model ID to use:")],
+        vec![],
+        PickerKind::CustomModel,
+    );
+    pk.entry = Some(Editor::default());
     r.picker = Some(pk);
 }
 

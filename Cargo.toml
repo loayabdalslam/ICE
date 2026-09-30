@@ -1,6 +1,6 @@
 [package]
 name = "ice"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 description = "ICE — an agentic coding tool that lives in your terminal"
 repository = "https://github.com/loayabdalslam/ICE"

@@ -216,9 +216,15 @@ pub fn list_models(p: &Provider) -> Result<Vec<String>> {
             p.key_envs[0]
         );
     }
+    let cfg = IceConfig::load();
     let base = std::env::var("ICE_BASE_URL")
         .ok()
-        .filter(|b| !b.is_empty() && IceConfig::load().provider == p.id)
+        .filter(|b| !b.is_empty() && cfg.provider == p.id)
+        .or_else(|| {
+            (cfg.provider == p.id)
+                .then(|| cfg.base_url.clone())
+                .flatten()
+        })
         .unwrap_or_else(|| p.base_url.to_string());
     let url = format!("{}/models", base.trim_end_matches('/'));
     let auth = format!("Bearer {key}");

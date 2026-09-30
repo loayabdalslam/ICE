@@ -62,13 +62,23 @@ pub enum Item {
 }
 
 pub enum PickerKind {
-    Model(Vec<String>),
+    Model {
+        models: Vec<String>,
+        custom_index: usize,
+    },
+    CustomModel,
     Resume(Vec<crate::store::SessionInfo>),
     Theme,
     Login,
-    LoginKey { provider: usize },
-    LoginUrl { provider: usize },
-    LoginMethod { provider: usize },
+    LoginKey {
+        provider: usize,
+    },
+    LoginUrl {
+        provider: usize,
+    },
+    LoginMethod {
+        provider: usize,
+    },
     OAuthWait,
     Memory(String),
     OpenMemory,
@@ -499,11 +509,16 @@ impl Repl {
             match b {
                 Bg::Models(Ok(list)) => {
                     if let Some(p) = &mut self.picker {
-                        if let PickerKind::Model(existing) = &mut p.kind {
+                        if let PickerKind::Model {
+                            models,
+                            custom_index,
+                        } = &mut p.kind
+                        {
                             for m in list {
-                                if !existing.contains(&m) {
-                                    existing.push(m.clone());
-                                    p.options.push((m, String::new()));
+                                if !models.contains(&m) {
+                                    models.push(m.clone());
+                                    p.options.insert(*custom_index, (m, String::new()));
+                                    *custom_index += 1;
                                 }
                             }
                         }
