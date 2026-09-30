@@ -8,7 +8,7 @@ ICE_EXPECT_OS=Linux
 # instead of building from source.
 #
 #   curl -fsSL https://raw.githubusercontent.com/loayabdalslam/ICE/main/install.sh | bash
-#   curl -fsSL .../install.sh | bash -s -- --ref v0.5.2 --bin-dir ~/bin
+#   curl -fsSL .../install.sh | bash -s -- --ref v0.5.3 --bin-dir ~/bin
 set -euo pipefail
 
 ice_main() {

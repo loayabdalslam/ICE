@@ -3,7 +3,7 @@
 //! - source: the installer cloned the repository and built it with cargo;
 //!   `ice update` pulls and rebuilds.
 //! - binary: a prebuilt release binary; `ice update` downloads the release
-//!   named in LATEST, verifies its SHA-256 and swaps the executable.
+//!   named by the repository Cargo.toml, verifies its SHA-256 and swaps the executable.
 //!
 //! The install record lives at ~/.ice/install.json.
 
@@ -92,19 +92,45 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
     }
 }
 
-/// Read the published LATEST version string.
+fn repository_version(manifest: &str) -> Result<String> {
+    let mut in_package = false;
+    for raw_line in manifest.lines() {
+        let line = raw_line.trim();
+        if line == "[package]" {
+            in_package = true;
+            continue;
+        }
+        if in_package && line.starts_with('[') {
+            break;
+        }
+        if !in_package {
+            continue;
+        }
+        let Some(value) = line
+            .strip_prefix("version")
+            .and_then(|value| value.trim_start().strip_prefix('='))
+        else {
+            continue;
+        };
+        let version: String =
+            serde_json::from_str(value.trim()).context("invalid package version in Cargo.toml")?;
+        if parse_version(&version).is_none() {
+            bail!("invalid package version in Cargo.toml: {version}");
+        }
+        return Ok(version);
+    }
+    bail!("package version not found in repository Cargo.toml")
+}
+
+/// Read the package version directly from the repository manifest.
 pub fn fetch_latest() -> Result<String> {
-    let (_, t) = crate::http::get_text(
-        &format!("{}/LATEST", base_url()),
+    let (_, manifest) = crate::http::get_text(
+        &format!("{}/Cargo.toml", base_url()),
         &[],
         Duration::from_secs(20),
-        1024,
+        64 * 1024,
     )?;
-    let v = t.trim().to_string();
-    if parse_version(&v).is_none() {
-        bail!("invalid remote version: {v}");
-    }
-    Ok(v)
+    repository_version(&manifest)
 }
 
 fn git(dir: &Path, args: &[&str]) -> Result<String> {
@@ -193,7 +219,10 @@ pub fn install(version: &str) -> Result<PathBuf> {
         &[],
         Duration::from_secs(30),
         1 << 20,
-    )?;
+    )
+    .with_context(|| {
+        format!("could not fetch ICE {version} release checksums; its binaries may not be published yet")
+    })?;
     let expected = sums
         .lines()
         .find_map(|line| {
@@ -425,5 +454,12 @@ mod tests {
         assert!(!is_newer("0.3.0", "0.3.0"));
         assert!(!is_newer("0.2.9", "0.3.0"));
         assert!(!is_newer("garbage", "0.3.0"));
+    }
+
+    #[test]
+    fn repository_version_reads_package_section_only() {
+        let manifest = "[package]\nname = \"ice\"\nversion = \"0.5.3\"\n\n[dependencies]\nexample = \"0.4.4\"\n";
+        assert_eq!(repository_version(manifest).unwrap(), "0.5.3");
+        assert!(repository_version("[dependencies]\nexample = \"0.4.4\"\n").is_err());
     }
 }
