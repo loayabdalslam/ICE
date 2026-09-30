@@ -340,23 +340,6 @@ pub fn get_json(url: &str, headers: &[(&str, &str)], timeout: Duration) -> Resul
     serde_json::from_str(&body).map_err(|e| anyhow!("invalid JSON from {url}: {e}"))
 }
 
-/// Download to bytes (for self-update).
-pub fn get_bytes(url: &str, timeout: Duration) -> Result<Vec<u8>> {
-    match agent_for(url).get(url).timeout(timeout).call() {
-        Ok(resp) => {
-            let mut buf = Vec::new();
-            resp.into_reader().take(256 << 20).read_to_end(&mut buf)?;
-            Ok(buf)
-        }
-        Err(ureq::Error::Status(code, resp)) => Err(HttpError {
-            status: code,
-            body: resp.into_string().unwrap_or_default(),
-        }
-        .into()),
-        Err(ureq::Error::Transport(t)) => Err(anyhow!("network error: {t}")),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

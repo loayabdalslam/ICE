@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#install"><img src="https://img.shields.io/badge/ICE-0.5.4-50d2ff?style=flat-square&labelColor=061018" alt="ICE 0.5.4"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/ICE-0.5.5-50d2ff?style=flat-square&labelColor=061018" alt="ICE 0.5.5"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-a0ecff?style=flat-square&labelColor=061018" alt="Apache 2.0 license"></a>
   <a href=".github/workflows/ci.yml"><img src="https://img.shields.io/badge/CI-linux_·_macOS_·_windows-40dcaa?style=flat-square&labelColor=061018" alt="CI on Linux, macOS and Windows"></a>
   <img src="https://img.shields.io/badge/built_with-Rust-a0ecff?style=flat-square&labelColor=061018" alt="Built with Rust">
@@ -60,7 +60,7 @@ Requirements: `git`, a C linker (`build-essential` on Linux, Xcode command-line 
 | `-Uninstall` | Windows: remove ICE and the PATH entry |
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/loayabdalslam/ICE/main/install.sh | bash -s -- --ref v0.5.4 --bin-dir ~/bin
+curl -fsSL https://raw.githubusercontent.com/loayabdalslam/ICE/main/install.sh | bash -s -- --ref v0.5.5 --bin-dir ~/bin
 ```
 
 Or build it yourself:
@@ -160,7 +160,7 @@ The Anthropic API uses native Messages streaming with prompt caching and extende
 | `ice mcp add NAME -- CMD ARGS…` · `ice mcp list` · `ice mcp remove NAME` | Manage MCP servers (`--transport http`, `--scope local\|project\|user`) |
 | `ice config list\|get\|set\|path` | Settings |
 | `ice init` | Scaffold `.ice/` (shared settings, example command and agent) |
-| `ice update [--check]` | Pull and rebuild (source install) or download (binary install) |
+| `ice update [--check]` | Build and install the latest repository source (requires Git and Rust/Cargo) |
 | `ice doctor` | Check the installation, providers, settings and MCP |
 | `ice completions bash\|zsh\|fish\|powershell` | Shell completions |
 

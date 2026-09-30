@@ -2,8 +2,8 @@
 //! installed:
 //! - source: the installer cloned the repository and built it with cargo;
 //!   `ice update` pulls and rebuilds.
-//! - binary: a prebuilt release binary; `ice update` downloads the release
-//!   named by the repository Cargo.toml, verifies its SHA-256 and swaps the executable.
+//! - binary: `ice update` clones the repository, builds it with cargo, and
+//!   swaps the executable.
 //!
 //! The install record lives at ~/.ice/install.json.
 
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-/// Where release artifacts live (raw repo contents).
+/// Where the repository manifest is fetched from to check its package version.
 pub fn base_url() -> String {
     std::env::var("ICE_UPDATE_BASE_URL")
         .unwrap_or_else(|_| "https://raw.githubusercontent.com/loayabdalslam/ICE/main".into())
@@ -47,30 +47,12 @@ pub fn install_method() -> String {
         Some(d) => format!("source ({})", d.display()),
         None => {
             if install_record()["method"].as_str() == Some("binary") {
-                "binary release".into()
+                "prebuilt binary (repository updates)".into()
             } else {
                 "unknown (built manually?)".into()
             }
         }
     }
-}
-
-/// The (directory, filename) of the release asset for this platform.
-fn target_asset() -> Result<(&'static str, &'static str)> {
-    let pair = if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-        ("windows-x86_64", "ice.exe")
-    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        ("linux-x86_64", "ice")
-    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
-        ("linux-aarch64", "ice")
-    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
-        ("macos-x86_64", "ice")
-    } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        ("macos-aarch64", "ice")
-    } else {
-        bail!("no ICE release build for this OS/architecture");
-    };
-    Ok(pair)
 }
 
 fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
@@ -156,6 +138,42 @@ fn source_ref() -> String {
         .to_string()
 }
 
+fn source_repository() -> String {
+    std::env::var("ICE_REPO")
+        .ok()
+        .or_else(|| install_record()["repo"].as_str().map(String::from))
+        .unwrap_or_else(|| "https://github.com/loayabdalslam/ICE.git".into())
+}
+
+fn update_checkout(log: &dyn Fn(&str)) -> Result<PathBuf> {
+    let base = crate::settings::user_dir().join("update-source");
+    let dir = if base.exists() && !base.join(".git").exists() {
+        base.with_file_name(format!("update-source-{}", nonce()))
+    } else {
+        base
+    };
+    if dir.join(".git").exists() {
+        return Ok(dir);
+    }
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir_all(parent).context("creating update source directory")?;
+    }
+    let branch = source_ref();
+    let repository = source_repository();
+    log(&format!("Cloning {repository} ({branch}) for the update…"));
+    let status = Command::new("git")
+        .args(["clone", "--quiet", "--depth", "1", "--branch"])
+        .arg(&branch)
+        .arg(&repository)
+        .arg(&dir)
+        .status()
+        .context("git is required to update ICE from the repository")?;
+    if !status.success() {
+        bail!("git clone failed while preparing the repository update");
+    }
+    Ok(dir)
+}
+
 /// For source installs: fetch the tracked ref and say whether it moved.
 fn source_behind(dir: &Path) -> Result<bool> {
     git(
@@ -204,50 +222,6 @@ pub fn update_from_source(dir: &Path, log: &dyn Fn(&str)) -> Result<PathBuf> {
         swap_exe(&staged, &target)?;
     }
     Ok(target)
-}
-
-/// Download, verify against SHA256SUMS.txt, and swap the running binary.
-pub fn install(version: &str) -> Result<PathBuf> {
-    if parse_version(version).is_none() {
-        bail!("invalid version: {version}");
-    }
-    let (dir, file) = target_asset()?;
-    let asset = format!("{dir}/{file}");
-    let release = format!("{}/releases/{version}", base_url());
-    let (_, sums) = crate::http::get_text(
-        &format!("{release}/SHA256SUMS.txt"),
-        &[],
-        Duration::from_secs(30),
-        1 << 20,
-    )
-    .with_context(|| {
-        format!("could not fetch ICE {version} release checksums; its binaries may not be published yet")
-    })?;
-    let expected = sums
-        .lines()
-        .find_map(|line| {
-            let (hash, path) = line.trim().split_once("  ")?;
-            (path.trim() == asset && hash.len() == 64).then(|| hash.to_ascii_lowercase())
-        })
-        .with_context(|| format!("no checksum for {asset} in ICE {version}"))?;
-    let exe = std::env::current_exe().context("cannot locate the running ICE binary")?;
-    let install_dir = exe
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-    let bytes = crate::http::get_bytes(&format!("{release}/{asset}"), Duration::from_secs(300))?;
-    if sha256_hex(&bytes) != expected {
-        bail!("SHA-256 mismatch — refusing to install");
-    }
-    let staged = install_dir.join(format!(".ice-new-{}.tmp", nonce()));
-    std::fs::write(&staged, &bytes).context("writing the staged download")?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755));
-    }
-    swap_exe(&staged, &exe)?;
-    Ok(exe)
 }
 
 /// Atomically replace `target` (the running exe) with `staged`.
@@ -311,13 +285,14 @@ pub fn run_cli(check_only: bool) -> Result<()> {
     }
     println!("New version available: {latest}");
     if check_only {
-        println!("Run `ice update` to install it.");
+        println!("Run `ice update` to build and install it from the repository.");
         return Ok(());
     }
-    let path = install(&latest)?;
+    let log = |line: &str| println!("{line}");
+    let dir = update_checkout(&log)?;
+    let path = update_from_source(&dir, &log)?;
     println!(
-        "Successfully updated from {} to {latest} ({}). Restart to use the new version.",
-        current_version(),
+        "Successfully built repository version {latest} at {}. Restart to use the new version.",
         path.display()
     );
     Ok(())
@@ -336,16 +311,16 @@ pub fn background_check() -> Option<String> {
     if !is_newer(&latest, current_version()) {
         return None;
     }
-    if install_record()["method"].as_str() == Some("binary") && install(&latest).is_ok() {
-        return Some(format!("✓ Updated to {latest} · restart to apply"));
-    }
-    Some(format!("Update {latest} available · run `ice update`"))
+    Some(format!(
+        "Update {latest} available · run `ice update` to build from the repository"
+    ))
 }
 
 // ---------------------------------------------------------------------------
 // Minimal, dependency-free SHA-256 (FIPS 180-4) for verifying downloads.
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 pub fn sha256_hex(data: &[u8]) -> String {
     sha256(data).iter().map(|b| format!("{b:02x}")).collect()
 }
