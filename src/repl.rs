@@ -146,6 +146,7 @@ pub struct Repl {
     pub(crate) hist_idx: Option<usize>,
     pub(crate) hist_draft: String,
     pub(crate) pastes: Vec<String>,
+    pub(crate) expanded_paste: Option<usize>,
     pub(crate) queued: Vec<String>,
 
     pub(crate) perm: Option<PermState>,
@@ -374,6 +375,7 @@ impl Repl {
             hist_idx: None,
             hist_draft: String::new(),
             pastes: Vec::new(),
+            expanded_paste: None,
             queued: Vec::new(),
             perm: None,
             picker: None,
@@ -1251,17 +1253,20 @@ impl Repl {
             " > YOUR NEXT MOVE ".to_string()
         };
         let inner = w.saturating_sub(6);
+        let (display_input, display_cursor) = expand_paste_for_display(
+            &self.input.text,
+            self.input.cursor,
+            &self.pastes,
+            self.expanded_paste,
+        );
         let shown = if mode_char != ">" {
-            &self.input.text[1..]
+            &display_input[1..]
         } else {
-            self.input.text.as_str()
+            display_input.as_str()
         };
         let mut ed = Editor {
             text: shown.to_string(),
-            cursor: self
-                .input
-                .cursor
-                .saturating_sub(if mode_char != ">" { 1 } else { 0 }),
+            cursor: display_cursor.saturating_sub(if mode_char != ">" { 1 } else { 0 }),
         };
         ed.cursor = ed.cursor.min(ed.text.len());
         let (rows, (cr, cc)) = ed.layout(inner, false);
@@ -1297,8 +1302,15 @@ impl Repl {
                     .push(" ┆", border),
             );
         }
-        let hint = "  Enter send   / commands   @ files   ! shell   Ctrl+L help   Esc interrupt";
-        let hint = render::truncate(hint, inner + 2);
+        let paste_hint = if self.expanded_paste.is_some() {
+            "F2 fold paste"
+        } else {
+            "F2 expand paste"
+        };
+        let hint = format!(
+            "  Enter send   / commands   @ files   ! shell   {paste_hint}   Ctrl+L help   Esc interrupt"
+        );
+        let hint = render::truncate(&hint, inner + 2);
         out.push(
             Line::styled("┆ ", border)
                 .push(hint.clone(), Style::fg(t.dim))
@@ -1588,6 +1600,7 @@ impl Repl {
                     self.submit_input();
                 }
             }
+            KeyCode::F(2) => self.toggle_paste_expansion(),
             KeyCode::Char('j') if ctrl => self.input.insert('\n'),
             KeyCode::Tab => {
                 if !self.sugg.is_empty() {
@@ -1877,8 +1890,27 @@ impl Repl {
 
     // ─────────────────────────── submit ───────────────────────────
 
+    fn toggle_paste_expansion(&mut self) {
+        if let Some(index) = self.expanded_paste.take() {
+            if self
+                .pastes
+                .get(index)
+                .map(|paste| self.input.text.contains(&paste_placeholder(index, paste)))
+                .unwrap_or(false)
+            {
+                return;
+            }
+        }
+        self.expanded_paste =
+            closest_folded_paste(&self.input.text, self.input.cursor, &self.pastes);
+        if self.expanded_paste.is_none() {
+            self.flash("No folded paste in the prompt");
+        }
+    }
+
     fn submit_input(&mut self) {
         let raw = self.input.take();
+        self.expanded_paste = None;
         self.hist_idx = None;
         self.sugg.clear();
         self.sugg_dismissed = false;
@@ -1943,6 +1975,69 @@ fn should_clip_paste(text: &str) -> bool {
     text.chars().count() > 800 || text.lines().count() > 10
 }
 
+fn paste_placeholder(index: usize, paste: &str) -> String {
+    format!(
+        "[Pasted text #{} +{} lines]",
+        index + 1,
+        paste.lines().count()
+    )
+}
+
+fn closest_folded_paste(input: &str, cursor: usize, pastes: &[String]) -> Option<usize> {
+    pastes
+        .iter()
+        .enumerate()
+        .filter_map(|(index, paste)| {
+            let tag = paste_placeholder(index, paste);
+            let start = input.find(&tag)?;
+            let end = start + tag.len();
+            let distance = if cursor < start {
+                start - cursor
+            } else if cursor > end {
+                cursor - end
+            } else {
+                0
+            };
+            Some((index, distance))
+        })
+        .min_by_key(|(_, distance)| *distance)
+        .map(|(index, _)| index)
+}
+
+fn expand_paste_for_display(
+    input: &str,
+    cursor: usize,
+    pastes: &[String],
+    expanded: Option<usize>,
+) -> (String, usize) {
+    let Some((index, paste)) =
+        expanded.and_then(|index| pastes.get(index).map(|paste| (index, paste)))
+    else {
+        return (input.to_string(), cursor);
+    };
+    let tag = paste_placeholder(index, paste);
+    let Some(start) = input.find(&tag) else {
+        return (input.to_string(), cursor);
+    };
+    let end = start + tag.len();
+    let mut display = input.to_string();
+    display.replace_range(start..end, paste);
+    let display_cursor = if cursor <= start {
+        cursor
+    } else if cursor >= end {
+        cursor - tag.len() + paste.len()
+    } else {
+        let char_offset = input[start..cursor].chars().count();
+        start
+            + paste
+                .char_indices()
+                .nth(char_offset)
+                .map(|(byte_index, _)| byte_index)
+                .unwrap_or(paste.len())
+    };
+    (display, display_cursor)
+}
+
 fn expand_pasted_text(raw: &str, pastes: &[String]) -> String {
     let mut text = raw.to_string();
     for (index, paste) in pastes.iter().enumerate() {
@@ -1957,7 +2052,10 @@ fn expand_pasted_text(raw: &str, pastes: &[String]) -> String {
 
 #[cfg(test)]
 mod paste_tests {
-    use super::{expand_pasted_text, should_clip_paste};
+    use super::{
+        closest_folded_paste, expand_paste_for_display, expand_pasted_text, paste_placeholder,
+        should_clip_paste,
+    };
 
     #[test]
     fn large_pastes_are_summarized_and_restored_without_byte_bias() {
@@ -1971,6 +2069,33 @@ mod paste_tests {
             expand_pasted_text(placeholder, &[pasted.clone()]),
             format!("Please review {pasted}")
         );
+    }
+
+    #[test]
+    fn folded_pastes_expand_for_display_and_keep_the_cursor_mapped() {
+        let pasted = "first line\nsecond line".to_string();
+        let tag = paste_placeholder(0, &pasted);
+        let input = format!("before {tag} after");
+        let cursor = input.len();
+
+        assert_eq!(closest_folded_paste(&input, 9, &[pasted.clone()]), Some(0));
+        let (display, mapped_cursor) =
+            expand_paste_for_display(&input, cursor, &[pasted.clone()], Some(0));
+        assert_eq!(display, format!("before {pasted} after"));
+        assert_eq!(mapped_cursor, display.len());
+        assert!(input.contains(&tag));
+        assert_eq!(
+            expand_paste_for_display(&input, cursor, &[pasted], None),
+            (input, cursor)
+        );
+
+        let arabic = "مرحبا بالعالم".to_string();
+        let arabic_tag = paste_placeholder(0, &arabic);
+        let input = format!("{arabic_tag} after");
+        let cursor = 9;
+        let (display, mapped_cursor) =
+            expand_paste_for_display(&input, cursor, &[arabic.clone()], Some(0));
+        assert_eq!(&display[..mapped_cursor], "مرحبا بال");
     }
 }
 
